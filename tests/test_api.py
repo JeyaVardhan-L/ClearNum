@@ -90,3 +90,64 @@ def test_purge_endpoint():
     resp = client.post("/api/privacy/purge")
     assert resp.status_code == 200
     assert resp.json()["success"] is True
+
+
+def test_scan_endpoint_and_deduplication():
+    # Test scan with local fallback
+    resp = client.post("/api/discovery/scan", json={
+        "phone_number": "+14155552671",
+        "default_region": "US",
+        "providers": [],
+        "target_urls": [],
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "identity_hmac" in data
+    assert data["total_found"] == 0
+
+    # Rescan same identity without foreign key errors
+    resp2 = client.post("/api/discovery/scan", json={
+        "phone_number": "+14155552671",
+        "default_region": "US",
+        "providers": [],
+        "target_urls": [],
+    })
+    assert resp2.status_code == 200
+
+
+def test_invalid_transition_endpoint_rejection():
+    # 1. Load synthetic demo
+    resp = client.post("/api/demo/synthetic")
+    assert resp.status_code == 200
+    demo_data = resp.json()
+    hmac_id = demo_data["identity_hmac"]
+
+    # 2. Query exposures and find one in DISCOVERED state
+    exp_resp = client.get(f"/api/discovery/exposures?identity_hmac={hmac_id}")
+    assert exp_resp.status_code == 200
+    exposures = exp_resp.json()
+    disc_exp = next(e for e in exposures if e["remediation_status"] == "DISCOVERED")
+
+    # 3. Attempt illegal transition from DISCOVERED directly to VERIFIED_REMOVED (must fail with 400)
+    trans_resp = client.post("/api/remediation/transition", json={
+        "exposure_id": disc_exp["id"],
+        "identity_hmac": hmac_id,
+        "next_state": "VERIFIED_REMOVED",
+    })
+    assert trans_resp.status_code == 400
+
+
+def test_export_audit_endpoint():
+    # Load synthetic scenario
+    resp = client.post("/api/demo/synthetic")
+    assert resp.status_code == 200
+    hmac_id = resp.json()["identity_hmac"]
+
+    # Export report
+    exp_resp = client.get(f"/api/privacy/export?identity_hmac={hmac_id}")
+    assert exp_resp.status_code == 200
+    report = exp_resp.json()
+    assert "report_title" in report
+    assert "exposures" in report
+    assert len(report["exposures"]) == 5
+

@@ -122,6 +122,27 @@ async def scan_discovery_endpoint(req: ScanRequest):
         res = await ddg.search(norm, max_results=12)
         all_provider_results.extend(res)
 
+    # Process user-supplied target URLs safely with SSRF protection
+    if req.target_urls:
+        for custom_url in req.target_urls:
+            clean_custom = custom_url.strip()
+            if not clean_custom.startswith(("http://", "https://")):
+                continue
+            try:
+                status_code, content, _ = await safe_fetch_url(clean_custom)
+                if status_code == 200:
+                    match_res = match_phone_in_text(content, norm)
+                    if match_res.matched:
+                        parsed_u = urlparse(clean_custom)
+                        all_provider_results.append(ProviderResult(
+                            url=clean_custom,
+                            title=f"Custom Target [{parsed_u.netloc}]",
+                            snippet=match_res.snippet,
+                            source_name="user_target",
+                        ))
+            except Exception:
+                pass
+
     # Process and deduplicate results
     seen_urls = set()
     discovered_items: List[DiscoveredExposureItem] = []
@@ -139,7 +160,6 @@ async def scan_discovery_endpoint(req: ScanRequest):
         confidence = match_eval.confidence if match_eval.matched else 0.75
         snippet = match_eval.snippet if match_eval.snippet else (item.snippet or item.title)
 
-        exposure_id = str(uuid.uuid4())
         parsed = urlparse(clean_url)
         domain = parsed.netloc.lower().replace("www.", "")
 
@@ -148,42 +168,60 @@ async def scan_discovery_endpoint(req: ScanRequest):
         source_id = rem_source.source_id if rem_source else "generic_web"
         official_removal_url = rem_source.official_removal_url if rem_source else None
 
-        # Insert or ignore exposure
-        cursor.execute("""
-            INSERT INTO exposures (
-                id, identity_hmac, source_id, url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(identity_hmac, url) DO UPDATE SET last_checked_at = excluded.last_checked_at
-        """, (
-            exposure_id,
-            norm.hmac_id,
-            source_id,
-            clean_url,
-            domain,
-            item.title,
-            match_type,
-            confidence,
-            snippet,
-            now_iso,
-            now_iso,
-        ))
+        cursor.execute("SELECT id FROM exposures WHERE identity_hmac = ? AND url = ?", (norm.hmac_id, clean_url))
+        existing_exp = cursor.fetchone()
 
-        # Create initial remediation action record
-        action_id = str(uuid.uuid4())
-        cursor.execute("""
-            INSERT INTO remediation_actions (
-                id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
-            action_id,
-            exposure_id,
-            norm.hmac_id,
-            source_id,
-            "ACTION_AVAILABLE" if rem_source else "DISCOVERED",
-            official_removal_url,
-            "Discovered via search provider",
-            now_iso,
-        ))
+        if existing_exp:
+            exposure_id = existing_exp["id"]
+            cursor.execute("""
+                UPDATE exposures
+                SET last_checked_at = ?, snippet = ?, confidence = ?, match_type = ?
+                WHERE id = ?
+            """, (now_iso, snippet, confidence, match_type, exposure_id))
+        else:
+            exposure_id = str(uuid.uuid4())
+            cursor.execute("""
+                INSERT INTO exposures (
+                    id, identity_hmac, source_id, url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                exposure_id,
+                norm.hmac_id,
+                source_id,
+                clean_url,
+                domain,
+                item.title,
+                match_type,
+                confidence,
+                snippet,
+                now_iso,
+                now_iso,
+            ))
+
+        # Check existing remediation action
+        cursor.execute("SELECT id, status, official_url FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
+        act_row = cursor.fetchone()
+
+        if not act_row:
+            action_id = str(uuid.uuid4())
+            rem_status = "ACTION_AVAILABLE" if rem_source else "DISCOVERED"
+            cursor.execute("""
+                INSERT INTO remediation_actions (
+                    id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                action_id,
+                exposure_id,
+                norm.hmac_id,
+                source_id,
+                rem_status,
+                official_removal_url,
+                "Discovered via search provider",
+                now_iso,
+            ))
+        else:
+            rem_status = act_row["status"]
+            official_removal_url = act_row["official_url"]
 
         discovered_items.append(DiscoveredExposureItem(
             id=exposure_id,
@@ -196,7 +234,7 @@ async def scan_discovery_endpoint(req: ScanRequest):
             snippet=snippet,
             discovered_at=now_iso,
             last_checked_at=now_iso,
-            remediation_status="ACTION_AVAILABLE" if rem_source else "DISCOVERED",
+            remediation_status=rem_status,
             official_removal_url=official_removal_url,
         ))
 

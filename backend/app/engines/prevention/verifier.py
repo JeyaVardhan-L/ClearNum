@@ -115,26 +115,62 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    cursor.execute("SELECT status FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
+    act_row = cursor.fetchone()
+    current_status = act_row["status"] if act_row else "DISCOVERED"
+
     if outcome.status == "CONFIRMED_REMOVED":
-        new_status = "VERIFIED_REMOVED"
-        cursor.execute("""
-            UPDATE remediation_actions
-            SET status = ?, verified_at = ?, notes = ?, updated_at = ?
-            WHERE exposure_id = ?
-        """, (new_status, outcome.verified_at, outcome.evidence_notes, outcome.verified_at, exposure_id))
+        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "PENDING", "ACTION_AVAILABLE"):
+            new_status = "VERIFIED_REMOVED"
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET status = ?, verified_at = ?, notes = ?, updated_at = ?
+                WHERE exposure_id = ?
+            """, (new_status, outcome.verified_at, outcome.evidence_notes, outcome.verified_at, exposure_id))
+        elif current_status == "DISCOVERED":
+            # Target never contained number or was already dead; reject false-positive rather than claim deletion
+            new_status = "REJECTED"
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET status = ?, notes = ?, updated_at = ?
+                WHERE exposure_id = ?
+            """, (new_status, f"Rejected as false positive: {outcome.evidence_notes}", outcome.verified_at, exposure_id))
+        else:
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET notes = ?, updated_at = ?
+                WHERE exposure_id = ?
+            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+
     elif outcome.status == "UNABLE_TO_VERIFY":
-        new_status = "UNABLE_TO_VERIFY"
-        cursor.execute("""
-            UPDATE remediation_actions
-            SET status = ?, notes = ?, updated_at = ?
-            WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
-        """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
+        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "PENDING"):
+            new_status = "UNABLE_TO_VERIFY"
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET status = ?, notes = ?, updated_at = ?
+                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
+            """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
+        else:
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET notes = ?, updated_at = ?
+                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
+            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+
     elif outcome.status == "STILL_EXPOSED":
-        cursor.execute("""
-            UPDATE remediation_actions
-            SET notes = ?, updated_at = ?
-            WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
-        """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+        if current_status == "DISCOVERED":
+            # Live scan confirmed telephone number presence on page: upgrade to VERIFIED
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET status = 'VERIFIED', notes = ?, updated_at = ?
+                WHERE exposure_id = ?
+            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+        else:
+            cursor.execute("""
+                UPDATE remediation_actions
+                SET notes = ?, updated_at = ?
+                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
+            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
 
     # Update last_checked_at on exposure
     cursor.execute("""
