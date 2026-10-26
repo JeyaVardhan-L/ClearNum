@@ -58,9 +58,9 @@ async def verify_exposure_url(
     if status_code in (404, 410):
         outcome = VerificationOutcome(
             url=url,
-            status="CONFIRMED_REMOVED",
+            status="NO_LONGER_VISIBLE_AT_CHECKED_URL",
             http_status_code=status_code,
-            evidence_notes=f"Confirmed removal: Server returned HTTP {status_code} (Resource Deleted/Gone).",
+            evidence_notes=f"No longer visible: Target server returned HTTP {status_code} (Resource Deleted/Gone). Does not confirm underlying database deletion until source confirms.",
             content_hash=content_hash,
             verified_at=now_iso,
         )
@@ -70,36 +70,36 @@ async def verify_exposure_url(
         if match_res.matched:
             outcome = VerificationOutcome(
                 url=url,
-                status="STILL_EXPOSED",
+                status="STILL_VISIBLE",
                 http_status_code=200,
-                evidence_notes=f"Still exposed: Found match ({match_res.match_type}): '{match_res.snippet}'",
+                evidence_notes=f"Still visible: Found match ({match_res.match_type}): '{match_res.snippet}'",
                 content_hash=content_hash,
                 verified_at=now_iso,
             )
         else:
             outcome = VerificationOutcome(
                 url=url,
-                status="CONFIRMED_REMOVED",
+                status="NO_LONGER_VISIBLE_AT_CHECKED_URL",
                 http_status_code=200,
-                evidence_notes="Confirmed removal: Webpage is live, but target telephone number is no longer present.",
+                evidence_notes="No longer visible: Webpage returned HTTP 200, but telephone number is absent from response. Underlying database deletion unconfirmed.",
                 content_hash=content_hash,
                 verified_at=now_iso,
             )
     elif status_code in (403, 429, 503):
         outcome = VerificationOutcome(
             url=url,
-            status="UNABLE_TO_VERIFY",
+            status="INACCESSIBLE_OR_INCONCLUSIVE",
             http_status_code=status_code,
-            evidence_notes=f"Automated verification challenged by anti-bot firewall (HTTP {status_code}). Manual inspection required.",
+            evidence_notes=f"Verification challenged by anti-bot firewall or rate-limit (HTTP {status_code}). Manual inspection required.",
             content_hash=content_hash,
             verified_at=now_iso,
         )
     else:
         outcome = VerificationOutcome(
             url=url,
-            status="UNABLE_TO_VERIFY",
+            status="INACCESSIBLE_OR_INCONCLUSIVE",
             http_status_code=status_code,
-            evidence_notes=f"Ambiguous response code HTTP {status_code}.",
+            evidence_notes=f"Inconclusive response code HTTP {status_code}.",
             content_hash=content_hash,
             verified_at=now_iso,
         )
@@ -119,15 +119,15 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
     act_row = cursor.fetchone()
     current_status = act_row["status"] if act_row else "DISCOVERED"
 
-    if outcome.status == "CONFIRMED_REMOVED":
-        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "PENDING", "ACTION_AVAILABLE"):
-            new_status = "VERIFIED_REMOVED"
+    if outcome.status == "NO_LONGER_VISIBLE_AT_CHECKED_URL":
+        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "AWAITING_VERIFICATION", "PENDING", "AWAITING_USER_APPROVAL", "ACTION_AVAILABLE"):
+            new_status = "NO_LONGER_VISIBLE_AT_CHECKED_URL"
             cursor.execute("""
                 UPDATE remediation_actions
                 SET status = ?, verified_at = ?, notes = ?, updated_at = ?
                 WHERE exposure_id = ?
             """, (new_status, outcome.verified_at, outcome.evidence_notes, outcome.verified_at, exposure_id))
-        elif current_status == "DISCOVERED":
+        elif current_status in ("DISCOVERED", "AWAITING_USER_REVIEW"):
             # Target never contained number or was already dead; reject false-positive rather than claim deletion
             new_status = "REJECTED"
             cursor.execute("""
@@ -142,35 +142,40 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
                 WHERE exposure_id = ?
             """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
 
-    elif outcome.status == "UNABLE_TO_VERIFY":
-        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "PENDING"):
-            new_status = "UNABLE_TO_VERIFY"
+    elif outcome.status == "INACCESSIBLE_OR_INCONCLUSIVE":
+        if current_status in ("SUBMITTED", "ACKNOWLEDGED", "AWAITING_VERIFICATION", "PENDING"):
+            new_status = "INACCESSIBLE_OR_INCONCLUSIVE"
             cursor.execute("""
                 UPDATE remediation_actions
                 SET status = ?, notes = ?, updated_at = ?
-                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
+                WHERE exposure_id = ? AND status != 'SOURCE_CONFIRMED_REMOVAL'
             """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
         else:
             cursor.execute("""
                 UPDATE remediation_actions
                 SET notes = ?, updated_at = ?
-                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
+                WHERE exposure_id = ? AND status != 'SOURCE_CONFIRMED_REMOVAL'
             """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
 
-    elif outcome.status == "STILL_EXPOSED":
-        if current_status == "DISCOVERED":
-            # Live scan confirmed telephone number presence on page: upgrade to VERIFIED
+    elif outcome.status == "STILL_VISIBLE":
+        if current_status in ("DISCOVERED", "AWAITING_USER_REVIEW"):
+            # Live scan confirmed telephone number presence on page: upgrade to CONFIRMED_EXPOSURE
             cursor.execute("""
                 UPDATE remediation_actions
-                SET status = 'VERIFIED', notes = ?, updated_at = ?
+                SET status = 'CONFIRMED_EXPOSURE', notes = ?, updated_at = ?
                 WHERE exposure_id = ?
             """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
         else:
+            # If was previously NO_LONGER_VISIBLE, mark as REAPPEARED!
+            if current_status in ("NO_LONGER_VISIBLE_AT_CHECKED_URL", "VERIFIED_REMOVED"):
+                new_status = "REAPPEARED"
+            else:
+                new_status = "STILL_VISIBLE"
             cursor.execute("""
                 UPDATE remediation_actions
-                SET notes = ?, updated_at = ?
-                WHERE exposure_id = ? AND status != 'VERIFIED_REMOVED'
-            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+                SET status = ?, notes = ?, updated_at = ?
+                WHERE exposure_id = ? AND status != 'SOURCE_CONFIRMED_REMOVAL'
+            """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
 
     # Update last_checked_at on exposure
     cursor.execute("""

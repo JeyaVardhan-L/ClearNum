@@ -96,7 +96,31 @@ def init_db(db_path: Path = settings.db_path) -> None:
         campaign_summary TEXT,
         reported_at TEXT NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS action_audit_log (
+        id TEXT PRIMARY KEY,
+        action_id TEXT NOT NULL,
+        identity_hmac TEXT NOT NULL,
+        from_state TEXT NOT NULL,
+        to_state TEXT NOT NULL,
+        evidence_type TEXT NOT NULL,
+        evidence_notes TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY(action_id) REFERENCES remediation_actions(id) ON DELETE CASCADE
+    );
     """)
+
+    # Safe data migration for existing databases: normalize legacy state names
+    try:
+        cursor.execute("UPDATE remediation_actions SET status = 'CONFIRMED_EXPOSURE' WHERE status = 'VERIFIED';")
+        cursor.execute("UPDATE remediation_actions SET status = 'AWAITING_USER_APPROVAL' WHERE status = 'ACTION_AVAILABLE';")
+        cursor.execute("UPDATE remediation_actions SET status = 'AWAITING_VERIFICATION' WHERE status = 'PENDING';")
+        cursor.execute("UPDATE remediation_actions SET status = 'NO_LONGER_VISIBLE_AT_CHECKED_URL' WHERE status = 'VERIFIED_REMOVED';")
+        cursor.execute("UPDATE remediation_actions SET status = 'INACCESSIBLE_OR_INCONCLUSIVE' WHERE status = 'UNABLE_TO_VERIFY';")
+        cursor.execute("UPDATE remediation_actions SET status = 'STILL_VISIBLE' WHERE status = 'FAILED';")
+    except Exception:
+        pass
+
     conn.commit()
     conn.close()
 
@@ -110,6 +134,7 @@ def purge_all_data(db_path: Path = settings.db_path, key_path: Path = settings.k
         try:
             conn = sqlite3.connect(str(db_path), check_same_thread=False)
             cursor = conn.cursor()
+            cursor.execute("DROP TABLE IF EXISTS action_audit_log;")
             cursor.execute("DROP TABLE IF EXISTS spam_incidents;")
             cursor.execute("DROP TABLE IF EXISTS subscriptions;")
             cursor.execute("DROP TABLE IF EXISTS remediation_actions;")

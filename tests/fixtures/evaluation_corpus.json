@@ -1,0 +1,156 @@
+[
+  {
+    "id": "eval_01_exact_e164_leak",
+    "name": "Exact E.164 in Raw Database Dump",
+    "origin": "Synthetic paste snippet (fictional number series)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "INSERT INTO users (id, name, email, phone) VALUES (4091, 'Alex Mercer', 'alex.mercer@example.org', '+14155552671');",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_02_dashed_directory_listing",
+    "name": "Dashed National Format in Directory",
+    "origin": "Simulated local business / personal directory listing",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<div class='profile'><h3>Jane Doe</h3><p class='contact'>Direct: 415-555-2671</p><p>San Francisco, CA</p></div>",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_03_parenthesized_resume",
+    "name": "Parenthesized Area Code in Resume",
+    "origin": "Synthetic resume contact block",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Senior Software Architect | Contact: (415) 555-2671 | Email: dev@example.com | GitHub: github.com/test",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_04_spaced_classified_ad",
+    "name": "Spaced National Format in Classified Ad",
+    "origin": "Simulated classified forum post",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Selling lightly used bicycle. Cash only on pickup. Please text 415 555 2671 if interested.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_05_dotted_variant",
+    "name": "Dotted Variant in Email Signature",
+    "origin": "Synthetic corporate email footer",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Best regards, Jordan Smith | Operations | Tel: 415.555.2671 | Acme Corp.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_06_india_mobile_e164",
+    "name": "India Mobile Number with Country Code",
+    "origin": "Synthetic customer support leak",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "Support escalation record #8812: Client verified via phone +91 98765 43210. Issue resolved.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_07_uk_london_landline",
+    "name": "UK London Landline in Directory",
+    "origin": "Synthetic UK business registry",
+    "phone_input": "+442079460991",
+    "region": "GB",
+    "content": "Company Headquarters: 10 Downing Mews, London. Inquiries: +44 20 7946 0991.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_08_false_positive_date_iso",
+    "name": "False Positive Rejection: ISO-8601 Date",
+    "origin": "Negative control pattern (YYYY-MM-DD)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Release notes for version 2.4.0 deployed on 2024-05-18 by release-bot. Check log file 2024-05-19 for details.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_09_false_positive_uuid",
+    "name": "False Positive Rejection: UUID v4 Key",
+    "origin": "Negative control pattern (hexadecimal UUID)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Transaction authorization token: c9a646d3-9c61-4cc9-bc8d-9c20bf9cc4fb. Status: Verified.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_10_false_positive_isbn",
+    "name": "False Positive Rejection: ISBN-13 Sequence",
+    "origin": "Negative control pattern (book catalog identifier)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Library Archive Record: Principles of Network Security, ISBN 978-3-16-148410-0, Published 2021.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_11_unrelated_recipe_article",
+    "name": "Irrelevant Web Page (Recipe)",
+    "origin": "Negative control (natural text containing prices and quantities)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<h1>Classic Sourdough Bread</h1><p>Bake at 450 degrees for 25 minutes. Cost of ingredients: $4.15 for 2671 grams of flour.</p>",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_12_non_matching_phone_number",
+    "name": "Different Phone Number Mentioned",
+    "origin": "Negative control (different valid US phone number)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Customer helpline is open Monday to Friday. Call (212) 555-0199 for billing inquiries.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_13_repeated_mentions_deduplication",
+    "name": "Multi-Mention Document for Deduplication",
+    "origin": "Simulated forum thread with 3 identical mentions",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<p>User 1: Contact me at 415-555-2671.</p><p>User 2: Did you say 415-555-2671?</p><p>User 1: Yes, +14155552671 is my number.</p>",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_14_obfuscated_html_markup",
+    "name": "Obfuscated HTML Tag Interleaving",
+    "origin": "Simulated web crawler challenge with span tag splits",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<div>Contact: <span>+1</span> <span>415</span> <span>555</span> <span>2671</span> (direct line)</div>",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  }
+]

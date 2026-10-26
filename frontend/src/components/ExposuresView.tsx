@@ -134,18 +134,40 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case "SOURCE_CONFIRMED_REMOVAL":
+        return <span className="status-pill pill-emerald"><CheckCircle2 className="w-3 h-3" /> Source Confirmed Removal</span>;
+      case "NO_LONGER_VISIBLE_AT_CHECKED_URL":
       case "VERIFIED_REMOVED":
-        return <span className="status-pill pill-emerald"><CheckCircle2 className="w-3 h-3" /> Verified Removed</span>;
+        return <span className="status-pill pill-teal"><CheckCircle2 className="w-3 h-3" /> No Longer Visible at URL</span>;
+      case "SEARCH_RESULT_DELISTED":
+        return <span className="status-pill pill-teal"><FileText className="w-3 h-3" /> Search Result Delisted</span>;
       case "SUBMITTED":
         return <span className="status-pill pill-cyan"><RefreshCw className="w-3 h-3" /> Submitted</span>;
       case "ACKNOWLEDGED":
         return <span className="status-pill pill-cyan"><FileText className="w-3 h-3" /> Acknowledged</span>;
+      case "AWAITING_VERIFICATION":
+      case "PENDING":
+        return <span className="status-pill pill-cyan"><RefreshCw className="w-3 h-3" /> Awaiting Verification</span>;
+      case "AWAITING_USER_APPROVAL":
       case "ACTION_AVAILABLE":
-        return <span className="status-pill pill-amber"><AlertTriangle className="w-3 h-3" /> Action Available</span>;
+        return <span className="status-pill pill-amber"><AlertTriangle className="w-3 h-3" /> Awaiting User Approval</span>;
+      case "CONFIRMED_EXPOSURE":
       case "VERIFIED":
-        return <span className="status-pill pill-cyan">Verified Exposed</span>;
+        return <span className="status-pill pill-amber">Confirmed Exposure</span>;
+      case "REQUEST_PREPARED":
+        return <span className="status-pill pill-amber"><FileText className="w-3 h-3" /> Request Prepared</span>;
+      case "STILL_VISIBLE":
+        return <span className="status-pill pill-rose"><AlertTriangle className="w-3 h-3" /> Still Visible</span>;
+      case "INACCESSIBLE_OR_INCONCLUSIVE":
+      case "UNABLE_TO_VERIFY":
+        return <span className="status-pill pill-amber">Inconclusive / Blocked</span>;
+      case "REAPPEARED":
+        return <span className="status-pill pill-rose"><AlertTriangle className="w-3 h-3" /> Reappeared</span>;
+      case "REJECTED":
       case "REJECTED_MATCH":
-        return <span className="status-pill pill-rose"><XCircle className="w-3 h-3" /> Rejected</span>;
+        return <span className="status-pill pill-slate"><XCircle className="w-3 h-3" /> Rejected Match</span>;
+      case "AWAITING_USER_REVIEW":
+        return <span className="status-pill pill-neutral">Awaiting User Review</span>;
       case "DISCOVERED":
       default:
         return <span className="status-pill pill-neutral">Discovered</span>;
@@ -438,12 +460,18 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                   onChange={(e) => setTargetNextState(e.target.value)}
                   className="input-field text-xs"
                 >
-                  <option value="VERIFIED">VERIFIED (Confirmed match on live broker profile)</option>
-                  <option value="ACTION_AVAILABLE">ACTION_AVAILABLE (Official opt-out procedure identified)</option>
-                  <option value="SUBMITTED">SUBMITTED (Opt-out request submitted via portal/email)</option>
-                  <option value="ACKNOWLEDGED">ACKNOWLEDGED (Broker confirmation email received)</option>
-                  <option value="VERIFIED_REMOVED">VERIFIED_REMOVED (Profile 404 / confirmed deleted)</option>
-                  <option value="REJECTED_MATCH">REJECTED_MATCH (False positive / not my record)</option>
+                  <option value="CONFIRMED_EXPOSURE">CONFIRMED_EXPOSURE (Confirmed phone appearance)</option>
+                  <option value="AWAITING_USER_APPROVAL">AWAITING_USER_APPROVAL (Removal path identified)</option>
+                  <option value="REQUEST_PREPARED">REQUEST_PREPARED (Legal notice generated)</option>
+                  <option value="SUBMITTED">SUBMITTED (Opt-out request sent via portal/email)</option>
+                  <option value="ACKNOWLEDGED">ACKNOWLEDGED (Broker confirmation received)</option>
+                  <option value="AWAITING_VERIFICATION">AWAITING_VERIFICATION (Pending statutory window)</option>
+                  <option value="NO_LONGER_VISIBLE_AT_CHECKED_URL">NO_LONGER_VISIBLE_AT_CHECKED_URL (Page 404 or number absent)</option>
+                  <option value="SEARCH_RESULT_DELISTED">SEARCH_RESULT_DELISTED (Delisted from Google/Bing cache)</option>
+                  <option value="SOURCE_CONFIRMED_REMOVAL">SOURCE_CONFIRMED_REMOVAL (Affirmative broker deletion receipt)</option>
+                  <option value="STILL_VISIBLE">STILL_VISIBLE (Target number still present on live page)</option>
+                  <option value="INACCESSIBLE_OR_INCONCLUSIVE">INACCESSIBLE_OR_INCONCLUSIVE (Firewall / anti-bot challenge)</option>
+                  <option value="REJECTED">REJECTED (False positive / not my record)</option>
                 </select>
                 <p className="text-[11px] text-slate-400 mt-1">
                   Current state: <span className="font-mono text-slate-200">{transitioningExposure.remediation_status}</span>

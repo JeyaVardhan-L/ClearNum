@@ -210,5 +210,13 @@ def serve(
     uvicorn.run("backend.app.main:app", host=host, port=port, reload=False)
 
 
+@app.command()
+def benchmark():
+    """Runs the deterministic ground-truth evaluation harness across synthetic test fixtures."""
+    from backend.app.engines.discovery.benchmark import run_benchmark, print_benchmark_report
+    metrics = run_benchmark()
+    print_benchmark_report(metrics, console)
+
+
 if __name__ == "__main__":
     app()

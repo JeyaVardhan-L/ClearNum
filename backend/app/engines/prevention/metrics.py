@@ -50,10 +50,21 @@ def calculate_metrics(identity_hmac: str) -> ExposureMetrics:
     """, (identity_hmac,))
     status_counts = {r["status"]: r["count"] for r in cursor.fetchall()}
 
-    verified_removed = status_counts.get("VERIFIED_REMOVED", 0)
+    verified_removed = (
+        status_counts.get("NO_LONGER_VISIBLE_AT_CHECKED_URL", 0)
+        + status_counts.get("SOURCE_CONFIRMED_REMOVAL", 0)
+        + status_counts.get("SEARCH_RESULT_DELISTED", 0)
+        + status_counts.get("VERIFIED_REMOVED", 0)
+    )
     submitted_actions = status_counts.get("SUBMITTED", 0) + status_counts.get("ACKNOWLEDGED", 0)
-    pending_actions = status_counts.get("PENDING", 0)
-    action_available = status_counts.get("ACTION_AVAILABLE", 0) + status_counts.get("VERIFIED", 0)
+    pending_actions = status_counts.get("AWAITING_VERIFICATION", 0) + status_counts.get("PENDING", 0)
+    action_available = (
+        status_counts.get("AWAITING_USER_APPROVAL", 0)
+        + status_counts.get("REQUEST_PREPARED", 0)
+        + status_counts.get("CONFIRMED_EXPOSURE", 0)
+        + status_counts.get("ACTION_AVAILABLE", 0)
+        + status_counts.get("VERIFIED", 0)
+    )
     rejected_matches = status_counts.get("REJECTED", 0)
 
     # Subscriptions
