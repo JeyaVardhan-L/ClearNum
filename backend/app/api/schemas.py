@@ -47,12 +47,23 @@ class DiscoveredExposureItem(BaseModel):
     official_removal_url: Optional[str] = None
 
 
+class ProviderOutcomeItem(BaseModel):
+    provider_id: str
+    status: str
+    result_count: int
+    duration_ms: int
+    retryable: bool
+    diagnostic: str
+    last_successful_check: Optional[str] = None
+
+
 class ScanResponse(BaseModel):
     identity_hmac: str
     masked_phone: str
     total_found: int
     exposures: List[DiscoveredExposureItem]
     manual_dorks_count: int
+    provider_outcomes: List[ProviderOutcomeItem] = Field(default_factory=list)
 
 
 class ManualDorkItem(BaseModel):

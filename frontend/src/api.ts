@@ -6,6 +6,7 @@
 import type {
   PhoneParseResult,
   DiscoveredExposure,
+  ProviderOutcome,
   RemediationSource,
   ManualDorkItem,
   SpamIncident,
@@ -33,7 +34,14 @@ export async function scanDiscovery(
   defaultRegion: string = "US",
   providers: string[] = ["searxng", "duckduckgo"],
   targetUrls: string[] = []
-): Promise<{ identity_hmac: string; masked_phone: string; exposures: DiscoveredExposure[]; total_found: number }> {
+): Promise<{
+  identity_hmac: string;
+  masked_phone: string;
+  exposures: DiscoveredExposure[];
+  total_found: number;
+  manual_dorks_count?: number;
+  provider_outcomes?: ProviderOutcome[];
+}> {
   const res = await fetch(`${API_BASE}/discovery/scan`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },

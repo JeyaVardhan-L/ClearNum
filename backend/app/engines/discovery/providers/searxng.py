@@ -1,21 +1,31 @@
 """SearXNG meta-search provider.
-Queries public or self-hosted SearXNG instances using the open JSON search API.
+Queries public or self-hosted SearXNG instances using the open JSON search API
+with structured health and failure observability.
 """
 
+import json
 import logging
+import time
 from typing import List
+from urllib.parse import urlparse
 import httpx
 from backend.app.core.config import settings
+from backend.app.core.security import mask_phone_number
 from backend.app.core.ssrf import validate_url_safe
 from backend.app.engines.discovery.normalizer import NormalizedPhone
-from backend.app.engines.discovery.providers.base import SearchProvider, ProviderResult
+from backend.app.engines.discovery.providers.base import (
+    SearchProvider,
+    ProviderResult,
+    ProviderStatus,
+    ProviderOutcome,
+    SearchExecutionResult,
+)
 
 logger = logging.getLogger(__name__)
 
-# List of vetted public instances if none configured locally
+# Primary vetting fallbacks when no local instance configured
 FALLBACK_INSTANCES = [
     "https://priv.au",
-    "https://search.ononoki.org",
     "https://searx.tiekoetter.com",
 ]
 
@@ -29,18 +39,44 @@ class SearXNGProvider(SearchProvider):
     def __init__(self, instance_url: str | None = None):
         self.instance_url = instance_url or settings.searxng_instance
 
-    async def search(self, phone: NormalizedPhone, max_results: int = 15) -> List[ProviderResult]:
+    async def search(self, phone: NormalizedPhone, max_results: int = 15) -> SearchExecutionResult:
+        start_time = time.perf_counter()
         results: List[ProviderResult] = []
-        if not phone.is_possible:
-            return results
+
+        if not phone.is_possible or not phone.e164:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            outcome = ProviderOutcome(
+                provider_id=self.provider_id,
+                status=ProviderStatus.UNSUPPORTED,
+                result_count=0,
+                duration_ms=duration_ms,
+                retryable=False,
+                diagnostic="Phone number is not possible or missing canonical E.164 representation",
+            )
+            return SearchExecutionResult(results=[], outcome=outcome)
 
         instances = [self.instance_url] if self.instance_url else FALLBACK_INSTANCES
-        query = f'"{phone.e164}"'
+        if not instances or not instances[0]:
+            duration_ms = int((time.perf_counter() - start_time) * 1000)
+            outcome = ProviderOutcome(
+                provider_id=self.provider_id,
+                status=ProviderStatus.UNCONFIGURED,
+                result_count=0,
+                duration_ms=duration_ms,
+                retryable=False,
+                diagnostic="No SearXNG instance configured (set SEARXNG_INSTANCE_URL in environment)",
+            )
+            return SearchExecutionResult(results=[], outcome=outcome)
 
-        for base_url in instances:
-            if not base_url:
-                continue
-            endpoint = f"{base_url.rstrip('/')}/search"
+        query = f'"{phone.e164}"'
+        last_status = ProviderStatus.UNREACHABLE
+        last_diagnostic = "All attempted SearXNG endpoints failed or were unreachable"
+
+        # Try configured instance or first accessible fallback (bounded, polite, no evasive hammering)
+        for base_url in instances[:2]:
+            clean_base = base_url.rstrip("/")
+            endpoint = f"{clean_base}/search"
+
             try:
                 # SSRF validate instance endpoint
                 validate_url_safe(endpoint)
@@ -49,10 +85,30 @@ class SearXNGProvider(SearchProvider):
                     "format": "json",
                     "language": "all",
                 }
+
                 async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
                     resp = await client.get(endpoint, params=params)
+                    duration_ms = int((time.perf_counter() - start_time) * 1000)
+
+                    if resp.status_code == 429:
+                        last_status = ProviderStatus.RATE_LIMITED
+                        last_diagnostic = f"SearXNG instance ({urlparse(clean_base).netloc}) returned HTTP 429 (Rate Limited). Respecting host backoff."
+                        # Stop here; do not hammer alternate public instances to evade rate limits
+                        break
+
                     if resp.status_code == 200:
-                        data = resp.json()
+                        try:
+                            data = resp.json()
+                        except (json.JSONDecodeError, ValueError):
+                            last_status = ProviderStatus.MALFORMED_RESPONSE
+                            last_diagnostic = f"SearXNG instance ({urlparse(clean_base).netloc}) returned invalid non-JSON payload."
+                            continue
+
+                        if not isinstance(data, dict):
+                            last_status = ProviderStatus.MALFORMED_RESPONSE
+                            last_diagnostic = f"SearXNG instance ({urlparse(clean_base).netloc}) returned non-dictionary response."
+                            continue
+
                         raw_results = data.get("results", [])
                         for item in raw_results[:max_results]:
                             url = item.get("url")
@@ -65,10 +121,38 @@ class SearXNGProvider(SearchProvider):
                                     snippet=content,
                                     provider_id=self.provider_id,
                                 ))
-                        if results:
-                            break  # Successfully obtained results
-            except Exception as e:
-                logger.debug("SearXNG instance %s failed or timed out: %s", base_url, e)
-                continue
 
-        return results
+                        outcome = ProviderOutcome(
+                            provider_id=self.provider_id,
+                            status=ProviderStatus.HEALTHY,
+                            result_count=len(results),
+                            duration_ms=duration_ms,
+                            retryable=False,
+                            diagnostic=(
+                                f"SearXNG query succeeded via {urlparse(clean_base).netloc} ({len(results)} matches)"
+                                if results
+                                else f"SearXNG query succeeded via {urlparse(clean_base).netloc} (zero matches)"
+                            ),
+                            last_successful_check=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                        )
+                        return SearchExecutionResult(results=results, outcome=outcome)
+
+                    last_status = ProviderStatus.UNREACHABLE
+                    last_diagnostic = f"SearXNG instance ({urlparse(clean_base).netloc}) returned HTTP {resp.status_code}"
+
+            except Exception as e:
+                masked = mask_phone_number(phone.e164)
+                logger.debug("SearXNG instance %s error for identity [%s]: %s", urlparse(clean_base).netloc, masked, type(e).__name__)
+                last_status = ProviderStatus.UNREACHABLE
+                last_diagnostic = f"Could not connect to SearXNG instance ({urlparse(clean_base).netloc})"
+
+        duration_ms = int((time.perf_counter() - start_time) * 1000)
+        outcome = ProviderOutcome(
+            provider_id=self.provider_id,
+            status=last_status,
+            result_count=len(results),
+            duration_ms=duration_ms,
+            retryable=(last_status in (ProviderStatus.RATE_LIMITED, ProviderStatus.UNREACHABLE)),
+            diagnostic=last_diagnostic,
+        )
+        return SearchExecutionResult(results=results, outcome=outcome)

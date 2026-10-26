@@ -19,6 +19,16 @@ export interface PhoneParseResult {
   raw_input?: string;
 }
 
+export interface ProviderOutcome {
+  provider_id: string;
+  status: "healthy" | "rate_limited" | "unreachable" | "unconfigured" | "malformed_response" | "unsupported";
+  result_count: number;
+  duration_ms: number;
+  retryable: boolean;
+  diagnostic: string;
+  last_successful_check?: string;
+}
+
 export interface DiscoveredExposure {
   id: string;
   source_id: string;

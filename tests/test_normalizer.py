@@ -55,3 +55,34 @@ def test_variant_generation():
     assert norm.spaced == "415 555 2671"
     assert norm.rfc3966 == "tel:+1-415-555-2671"
     assert f'"{norm.e164}"' in norm.search_queries
+    assert f'"{norm.dashed}"' in norm.search_queries
+    assert f'"{norm.national}"' in norm.search_queries
+
+
+def test_ambiguous_number_without_region_rejected():
+    """National-format numbers without '+' or region context must be flagged ambiguous, never guessed as US."""
+    norm = parse_and_normalize("9876543210", default_region=None)
+    assert norm.is_ambiguous is True
+    assert norm.is_valid is False
+    assert norm.is_possible is False
+    assert norm.line_type == "AMBIGUOUS"
+    assert len(norm.search_queries) == 0
+
+
+def test_india_number_formats_and_permutations():
+    """Verify Indian national and international formatting with explicit IN region context."""
+    norm = parse_and_normalize("9876543210", default_region="IN")
+    assert norm.is_valid is True
+    assert norm.country_code == 91
+    assert norm.e164 == "+919876543210"
+    assert norm.is_ambiguous is False
+    # Check permutations contain E.164 and national
+    assert f'"{norm.e164}"' in norm.query_permutations
+
+
+def test_permutation_capping_and_deduplication():
+    """Query permutations must be strictly bounded and deduplicated."""
+    norm = parse_and_normalize("+14155552671", "US", max_permutations=5)
+    assert len(norm.query_permutations) <= 5
+    # Verify strict deduplication
+    assert len(norm.query_permutations) == len(set(norm.query_permutations))

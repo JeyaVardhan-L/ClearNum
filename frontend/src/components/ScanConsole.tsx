@@ -7,8 +7,10 @@ import {
   Check,
   Copy,
   Lock,
+  AlertTriangle,
+  Activity,
 } from "lucide-react";
-import type { PhoneParseResult, ManualDorkItem } from "../types";
+import type { PhoneParseResult, ManualDorkItem, ProviderOutcome } from "../types";
 import { parsePhone, scanDiscovery, getManualDorks } from "../api";
 
 interface ScanConsoleProps {
@@ -42,6 +44,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
   const [providers, setProviders] = useState({ searxng: true, duckduckgo: true });
   const [customUrls, setCustomUrls] = useState("");
   const [scanMessage, setScanMessage] = useState<string | null>(null);
+  const [providerOutcomes, setProviderOutcomes] = useState<ProviderOutcome[]>([]);
   
   // Dorks Modal
   const [showDorksModal, setShowDorksModal] = useState(false);
@@ -83,6 +86,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
 
     try {
       const res = await scanDiscovery(parseData.e164 || phoneNumber, region, activeProviders, targetList);
+      setProviderOutcomes(res.provider_outcomes || []);
       setScanMessage(`Scan complete: Discovered ${res.total_found} potential exposure records.`);
       onScanComplete(parseData);
     } catch (err: any) {
@@ -258,6 +262,73 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
               <div className="p-3 rounded-md bg-sky-950/40 border border-sky-800 text-xs text-sky-300 flex items-center gap-2">
                 <Info className="w-4 h-4 shrink-0" />
                 <span>{scanMessage}</span>
+              </div>
+            )}
+
+            {/* Observable Provider Diagnostics & Health Badges */}
+            {providerOutcomes.length > 0 && (
+              <div className="panel-card p-4 space-y-3 bg-slate-950/60 border border-slate-800">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-slate-200 flex items-center gap-1.5">
+                    <Activity className="w-3.5 h-3.5 text-sky-400" />
+                    Provider Diagnostics &amp; Health
+                  </span>
+                  <span className="text-[11px] text-[var(--text-dim)]">Observable Execution</span>
+                </div>
+
+                <div className="space-y-2">
+                  {providerOutcomes.map((po) => {
+                    const isHealthy = po.status === "healthy";
+                    const isRateLimited = po.status === "rate_limited";
+                    const isUnreachable = po.status === "unreachable";
+
+                    const badgeClass = isHealthy
+                      ? "status-pill pill-emerald"
+                      : isRateLimited
+                      ? "status-pill pill-amber"
+                      : isUnreachable
+                      ? "status-pill pill-rose"
+                      : "status-pill pill-slate";
+
+                    return (
+                      <div
+                        key={po.provider_id}
+                        className="p-2.5 rounded bg-slate-900/80 border border-slate-800 text-xs flex flex-col md:flex-row md:items-center justify-between gap-2"
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-slate-200 capitalize">
+                              {po.provider_id === "duckduckgo" ? "DuckDuckGo Web" : po.provider_id === "searxng" ? "SearXNG Engine" : po.provider_id}
+                            </span>
+                            <span className={`${badgeClass} text-[10px]`}>
+                              {po.status.replace("_", " ")}
+                            </span>
+                            <span className="text-[11px] text-[var(--text-dim)]">({po.duration_ms}ms)</span>
+                          </div>
+                          <p className="text-[11px] text-[var(--text-muted)]">{po.diagnostic}</p>
+                        </div>
+                        <div className="text-[11px] font-mono text-slate-300 shrink-0">
+                          {po.result_count} {po.result_count === 1 ? "match" : "matches"}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Explicit Truthful Notice when Zero Results Encountered with Unhealthy Providers */}
+                {providerOutcomes.some((po) => po.status !== "healthy") && (
+                  <div className="p-3 rounded-lg bg-amber-950/40 border border-amber-800/80 text-xs text-amber-200 space-y-1">
+                    <div className="flex items-center gap-2 font-semibold text-amber-300">
+                      <AlertTriangle className="w-4 h-4 shrink-0 text-amber-400" />
+                      <span>Zero Exposure Is Unconfirmed</span>
+                    </div>
+                    <p className="text-[11px] leading-relaxed text-amber-200/90">
+                      One or more search adapters encountered upstream obstacles (rate-limiting, missing instance configuration, or network blockage). 
+                      An empty automated result under these conditions does <strong>not</strong> prove zero online exposure. 
+                      Use the <strong>Direct Search Dorks (1-Click)</strong> button above to independently inspect Google, Bing, and Brave directly.
+                    </p>
+                  </div>
+                )}
               </div>
             )}
           </form>

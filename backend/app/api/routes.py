@@ -48,6 +48,7 @@ from backend.app.api.schemas import (
     ScanRequest,
     ScanResponse,
     DiscoveredExposureItem,
+    ProviderOutcomeItem,
     ManualDorkItem,
     TransitionActionRequest,
     GenerateTemplateRequest,
@@ -110,17 +111,38 @@ async def scan_discovery_endpoint(req: ScanRequest):
     conn.commit()
 
     all_provider_results: List[ProviderResult] = []
+    provider_outcomes: List[ProviderOutcomeItem] = []
 
     # Run chosen providers
     if "searxng" in req.providers:
         searx = SearXNGProvider()
         res = await searx.search(norm, max_results=12)
         all_provider_results.extend(res)
+        if res.outcome:
+            provider_outcomes.append(ProviderOutcomeItem(
+                provider_id=res.outcome.provider_id,
+                status=res.outcome.status.value,
+                result_count=res.outcome.result_count,
+                duration_ms=res.outcome.duration_ms,
+                retryable=res.outcome.retryable,
+                diagnostic=res.outcome.diagnostic,
+                last_successful_check=res.outcome.last_successful_check,
+            ))
 
     if "duckduckgo" in req.providers:
         ddg = DuckDuckGoProvider()
         res = await ddg.search(norm, max_results=12)
         all_provider_results.extend(res)
+        if res.outcome:
+            provider_outcomes.append(ProviderOutcomeItem(
+                provider_id=res.outcome.provider_id,
+                status=res.outcome.status.value,
+                result_count=res.outcome.result_count,
+                duration_ms=res.outcome.duration_ms,
+                retryable=res.outcome.retryable,
+                diagnostic=res.outcome.diagnostic,
+                last_successful_check=res.outcome.last_successful_check,
+            ))
 
     # Process user-supplied target URLs safely with SSRF protection
     if req.target_urls:
@@ -249,6 +271,7 @@ async def scan_discovery_endpoint(req: ScanRequest):
         total_found=len(discovered_items),
         exposures=discovered_items,
         manual_dorks_count=len(dorks),
+        provider_outcomes=provider_outcomes,
     )
 
 
