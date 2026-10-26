@@ -41,7 +41,12 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
   const [region, setRegion] = useState(currentIdentity?.region_code || "US");
   const [parseData, setParseData] = useState<PhoneParseResult | null>(currentIdentity);
   const [isScanning, setIsScanning] = useState(false);
-  const [providers, setProviders] = useState({ searxng: true, duckduckgo: true });
+  const [providers, setProviders] = useState({
+    searxng: true,
+    duckduckgo: true,
+    wikimedia: true,
+    hackernews: true,
+  });
   const [customUrls, setCustomUrls] = useState("");
   const [scanMessage, setScanMessage] = useState<string | null>(null);
   const [providerOutcomes, setProviderOutcomes] = useState<ProviderOutcome[]>([]);
@@ -58,7 +63,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
       try {
         const res = await parsePhone(phoneNumber, region);
         setParseData(res);
-      } catch (err) {
+      } catch {
         // Silently keep current parse
       }
     }, 250);
@@ -78,6 +83,8 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
     const activeProviders: string[] = [];
     if (providers.searxng) activeProviders.push("searxng");
     if (providers.duckduckgo) activeProviders.push("duckduckgo");
+    if (providers.wikimedia) activeProviders.push("wikimedia");
+    if (providers.hackernews) activeProviders.push("hackernews");
 
     const targetList = customUrls
       .split("\n")
@@ -217,6 +224,32 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                     <span className="text-[11px] text-[var(--text-dim)]">Lightweight non-tracking query endpoint with polite backoff.</span>
                   </div>
                 </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] cursor-pointer hover:border-[var(--border-strong)]">
+                  <input
+                    type="checkbox"
+                    checked={providers.wikimedia}
+                    onChange={(e) => setProviders({ ...providers, wikimedia: e.target.checked })}
+                    className="mt-0.5 accent-sky-500 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-200 block">Wikipedia / Wikimedia</span>
+                    <span className="text-[11px] text-[var(--text-dim)]">Official MediaWiki API searching public discussions, pages & leaks.</span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] cursor-pointer hover:border-[var(--border-strong)]">
+                  <input
+                    type="checkbox"
+                    checked={providers.hackernews}
+                    onChange={(e) => setProviders({ ...providers, hackernews: e.target.checked })}
+                    className="mt-0.5 accent-sky-500 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-200 block">Hacker News (Algolia)</span>
+                    <span className="text-[11px] text-[var(--text-dim)]">Official Algolia API querying comments, resumes & public listings.</span>
+                  </div>
+                </label>
               </div>
             </div>
 
@@ -298,7 +331,15 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                         <div className="space-y-0.5">
                           <div className="flex items-center gap-2">
                             <span className="font-semibold text-slate-200 capitalize">
-                              {po.provider_id === "duckduckgo" ? "DuckDuckGo Web" : po.provider_id === "searxng" ? "SearXNG Engine" : po.provider_id}
+                              {po.provider_id === "duckduckgo"
+                                ? "DuckDuckGo Web"
+                                : po.provider_id === "searxng"
+                                ? "SearXNG Engine"
+                                : po.provider_id === "wikimedia"
+                                ? "Wikipedia / Wikimedia"
+                                : po.provider_id === "hackernews"
+                                ? "Hacker News (Algolia)"
+                                : po.provider_id}
                             </span>
                             <span className={`${badgeClass} text-[10px]`}>
                               {po.status.replace("_", " ")}

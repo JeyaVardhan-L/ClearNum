@@ -20,7 +20,10 @@ Every candidate is evaluated against seven mandatory criteria:
 | **libphonenumber (`phonenumbers`)** | Offline Telephony | Yes (100% Free) | None | Country, carrier metadata, line type, format variants | None (100% Local) | **Core Engine** (Mandatory) |
 | **SearXNG Instances** | Meta-Search | Yes | None (on open instances) | Aggregated web search results (Google, Bing, DDG, Mojeek) | Search query only | **Implemented Provider** |
 | **DuckDuckGo HTML / Lite** | Web Search | Yes | None | Indexed public web mentions, forums, pastes, listings | Search query only | **Implemented Provider** (with backoff) |
+| **Wikipedia / Wikimedia API** | Indexed Documents | Yes (100% Free) | None | Leaked contact details, public talk pages, meeting notes | Search query only | **Implemented Provider** (Official REST API) |
+| **Hacker News (Algolia API)** | Discussions & Hiring | Yes (100% Free) | None | Resumes, launch comments, public support numbers | Search query only | **Implemented Provider** (Official REST API) |
 | **Direct Browser Dorks** | Search Workflows | Yes | None | Google, Bing, Brave, Yahoo, Yandex, GitHub, Pastebin | Handled in user browser | **Implemented Workflow** (1-click) |
+| **GitHub Search API** | Code Repositories | Free tier | Mandatory User PAT Auth | Code leaks in open repos | Token + query | **Rejected for Automated API** (Requires Auth; Covered via Dorks) |
 | **Local MBOX Parser** | User-Authorized Email | Yes | None | Unsubscribe headers, marketing lists, signatures | None (100% Local) | **Implemented Feature** |
 | **Local SMS Backup Parser** | User-Authorized SMS | Yes | None | Commercial shortcodes, spam senders, opt-out words | None (100% Local) | **Implemented Feature** |
 | **Public Directory Opt-Outs** | Remediation Registry | Yes | None (manual) | 25+ data brokers (Whitepages, TruePeopleSearch, Radaris, etc.) | Target profile URL | **Implemented Remediation Hub** |
@@ -59,7 +62,23 @@ Every candidate is evaluated against seven mandatory criteria:
 - **Data Egress**: Search query string.
 - **Verdict**: **Adopted with exponential backoff and manual fallback**.
 
-### D. Direct Browser Dorking Engine
+### D. Indexed Public Documents: Wikipedia / Wikimedia API
+- **What it discovers**: Unintended telephone disclosures in public project pages, user talk pages, community event listings, petition registers, and document revision histories across Wikimedia projects.
+- **Cost**: 100% free (MediaWiki Action API).
+- **Credentials**: None.
+- **Quotas**: Up to 200 req/sec under Wikimedia User-Agent policy; NumberShield executes at ~1 req per user-initiated scan with identifying User-Agent (`NumberShield/1.0`).
+- **Data Egress**: Search query only over HTTPS.
+- **Verdict**: **Adopted as high-confidence official document discovery provider**.
+
+### E. Tech Discussions & Resumes: Hacker News (Algolia API)
+- **What it discovers**: Contact numbers leaked in developer discussions, "Ask HN: Who is hiring? / Who wants to be hired?" resumes, project launch announcements, and startup contact comments.
+- **Cost**: 100% free.
+- **Credentials**: None.
+- **Quotas**: Documented 10,000 requests/hour limit per IP.
+- **Data Egress**: Search query only over HTTPS.
+- **Verdict**: **Adopted as official tech & developer listing discovery provider**.
+
+### F. Direct Browser Dorking Engine
 - **What it discovers**: Complete query coverage across Google, Bing, Brave, Yahoo, Yandex, GitHub, Pastebin, and specialized people search engines.
 - **Cost**: 100% free.
 - **Credentials**: None needed by the app. Uses user's existing browser session.

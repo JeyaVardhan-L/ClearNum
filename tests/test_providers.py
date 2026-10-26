@@ -7,6 +7,8 @@ from backend.app.engines.discovery.normalizer import parse_and_normalize
 from backend.app.engines.discovery.providers import (
     DuckDuckGoProvider,
     SearXNGProvider,
+    WikimediaProvider,
+    HackerNewsProvider,
     ProviderStatus,
     ProviderOutcome,
     SearchExecutionResult,
@@ -217,3 +219,123 @@ def test_search_execution_result_backwards_compatible():
     # Test iteration
     for el in container:
         assert el.url == "https://example.com"
+
+
+# --- Wikimedia Provider Tests ---
+
+@pytest.mark.asyncio
+async def test_wikimedia_healthy_with_results(valid_phone):
+    fake_json = {
+        "query": {
+            "search": [
+                {
+                    "title": "Community Directory 2024",
+                    "snippet": "Contact organizer at <span class=\"searchmatch\">+14155552671</span> for inquiry",
+                    "timestamp": "2024-05-01T12:00:00Z",
+                }
+            ]
+        }
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_json
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WikimediaProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 1
+        assert "Community_Directory_2024" in res[0].url
+        assert "Wikipedia" in res[0].title
+        assert res.outcome.status == ProviderStatus.HEALTHY
+        assert res.outcome.result_count == 1
+        assert "searchmatch" not in res[0].snippet
+
+
+@pytest.mark.asyncio
+async def test_wikimedia_rate_limited_http_429(valid_phone):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WikimediaProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.RATE_LIMITED
+        assert res.outcome.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_wikimedia_unreachable_on_timeout(valid_phone):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.TimeoutException("Timeout")):
+        provider = WikimediaProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.UNREACHABLE
+        assert res.outcome.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_wikimedia_malformed_response(valid_phone):
+    fake_err_json = {"error": {"info": "MediaWiki query syntax error"}}
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_err_json
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WikimediaProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.MALFORMED_RESPONSE
+        assert "MediaWiki error" in res.outcome.diagnostic
+
+
+# --- Hacker News Provider Tests ---
+
+@pytest.mark.asyncio
+async def test_hackernews_healthy_with_results(valid_phone):
+    fake_json = {
+        "hits": [
+            {
+                "objectID": "9876543",
+                "author": "alice_dev",
+                "story_title": "Ask HN: Freelancer directory",
+                "comment_text": "Reach me at <b>+14155552671</b> for contract work",
+            }
+        ]
+    }
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_json
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = HackerNewsProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 1
+        assert "item?id=9876543" in res[0].url
+        assert "Ask HN: Freelancer directory" in res[0].title
+        assert res.outcome.status == ProviderStatus.HEALTHY
+        assert res.outcome.result_count == 1
+        assert "<b>" not in res[0].snippet
+
+
+@pytest.mark.asyncio
+async def test_hackernews_rate_limited_http_429(valid_phone):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = HackerNewsProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.RATE_LIMITED
+        assert res.outcome.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_hackernews_unreachable_on_error(valid_phone):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.ConnectError("Network error")):
+        provider = HackerNewsProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.UNREACHABLE
+        assert res.outcome.retryable is True

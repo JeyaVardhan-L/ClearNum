@@ -28,7 +28,7 @@ class PhoneParseResponse(BaseModel):
 class ScanRequest(BaseModel):
     phone_number: str
     default_region: str = "US"
-    providers: List[str] = Field(default_factory=lambda: ["searxng", "duckduckgo"])
+    providers: List[str] = Field(default_factory=lambda: ["searxng", "duckduckgo", "wikimedia", "hackernews"])
     target_urls: Optional[List[str]] = Field(default_factory=list, description="Optional user-supplied URLs to scan")
 
 

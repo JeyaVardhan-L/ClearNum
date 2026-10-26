@@ -32,7 +32,7 @@ export function App() {
         setCurrentIdentity(parsed);
         const expList = await getExposures(parsed.hmac_id).catch(() => []);
         setExposures(expList);
-      } catch (err) {
+      } catch {
         // Backend may be starting up
       }
     }

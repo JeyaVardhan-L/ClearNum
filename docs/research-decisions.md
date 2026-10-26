@@ -110,3 +110,25 @@ If NumberShield stores phone numbers in plaintext on disk, a local malware infec
    - A custom logging filter intercepts all logging records and applies regular expression redaction for all E.164 and localized telephone formats before writing to stdout or disk.
 4. **Instant Cryptographic Purge (`/purge`)**:
    - A single command or button deletes all database tables, exposure records, logs, and resets the encryption key, ensuring zero residual footprint.
+
+---
+
+## 6. Source Expansion Research & Adapter Selection
+
+In expanding automated discovery beyond generic web search, candidate public platforms were evaluated for incremental discovery value, authorized API access, zero mandatory cost, and terms of service compliance:
+
+1. **Wikipedia / Wikimedia Document Search API (`WikimediaProvider`)**:
+   - *Rationale for selection*: Wikimedia documents, user talk pages, project revisions, and event registration logs frequently preserve accidental PII disclosures. MediaWiki provides an official, free, stable REST/Action API (`en.wikipedia.org/w/api.php`) with no authentication requirements and a generous 200 req/sec limit under its documented User-Agent policy.
+   - *Implementation*: NumberShield includes a custom identifying User-Agent (`NumberShield/1.0`), extracts high-provenance article titles and cleaned snippets, and formats direct canonical URLs.
+
+2. **Hacker News Algolia Search API (`HackerNewsProvider`)**:
+   - *Rationale for selection*: Technical forums, "Ask HN: Who is hiring? / Who wants to be hired?" threads, and startup launch discussions frequently contain public comments with personal contact details and support numbers. Algolia provides the official public search engine for Hacker News with an open JSON API (`hn.algolia.com/api/v1/search`), 10,000 requests/hour allowance, and zero authentication.
+   - *Implementation*: Queries comment and story text for exact phone permutations, parses item IDs, and links directly to official Hacker News discussion threads.
+
+3. **GitHub Code Search API (Automated API Rejected; Direct Browser Dorking Selected)**:
+   - *Evaluation*: GitHub's public Code Search API (`api.github.com/search/code`) strictly requires authenticated Personal Access Tokens (returning HTTP 401 for anonymous calls) and imposes tight rate limits (10-30 req/min). Forcing users to create GitHub developer tokens contradicts NumberShield's zero-friction, zero-account philosophy.
+   - *Solution*: Automated unauthenticated API was rejected. Instead, targeted GitHub Code Search dorks (`site:github.com` or `https://github.com/search?type=code&q=...`) are provided in the 1-click Manual Dork Generator, allowing the user to execute deep code searches within their existing browser session.
+
+4. **Pastebin Scraping (Rejected in favor of Search Index Dorking)**:
+   - *Evaluation*: Pastebin implements Cloudflare protection on its public interface and charges for its scraping API ($50+ lifetime/commercial). Direct scraping violates ToS and risks automated IP bans.
+   - *Solution*: Discovery of leaked pastes is performed via indexed search engine dorks (`site:pastebin.com ...`), achieving paste discovery at zero cost without bot evasion.

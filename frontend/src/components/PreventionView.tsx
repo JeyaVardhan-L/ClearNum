@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import {
   PhoneOff,
   AlertTriangle,
@@ -44,11 +44,7 @@ export const PreventionView: React.FC<PreventionViewProps> = ({ currentIdentity 
   // Active DND Guide tab
   const [selectedCountry, setSelectedCountry] = useState("US");
 
-  useEffect(() => {
-    refreshData();
-  }, [currentIdentity]);
-
-  const refreshData = async () => {
+  const refreshData = useCallback(async () => {
     try {
       const dndRes = await getDndGuides();
       setDndGuides(dndRes.telecom_guides || []);
@@ -65,7 +61,20 @@ export const PreventionView: React.FC<PreventionViewProps> = ({ currentIdentity 
     } catch (err) {
       console.error("Failed to load prevention data", err);
     }
-  };
+  }, [currentIdentity]);
+
+  useEffect(() => {
+    let active = true;
+    const load = async () => {
+      if (active) {
+        await refreshData();
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [refreshData]);
 
   const handleRecordSpam = async (e: React.FormEvent) => {
     e.preventDefault();

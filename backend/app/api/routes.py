@@ -14,6 +14,8 @@ from backend.app.engines.discovery import parse_and_normalize, match_phone_in_te
 from backend.app.engines.discovery.providers import (
     SearXNGProvider,
     DuckDuckGoProvider,
+    WikimediaProvider,
+    HackerNewsProvider,
     generate_manual_dorks,
     ProviderResult,
 )
@@ -132,6 +134,36 @@ async def scan_discovery_endpoint(req: ScanRequest):
     if "duckduckgo" in req.providers:
         ddg = DuckDuckGoProvider()
         res = await ddg.search(norm, max_results=12)
+        all_provider_results.extend(res)
+        if res.outcome:
+            provider_outcomes.append(ProviderOutcomeItem(
+                provider_id=res.outcome.provider_id,
+                status=res.outcome.status.value,
+                result_count=res.outcome.result_count,
+                duration_ms=res.outcome.duration_ms,
+                retryable=res.outcome.retryable,
+                diagnostic=res.outcome.diagnostic,
+                last_successful_check=res.outcome.last_successful_check,
+            ))
+
+    if "wikimedia" in req.providers:
+        wiki = WikimediaProvider()
+        res = await wiki.search(norm, max_results=10)
+        all_provider_results.extend(res)
+        if res.outcome:
+            provider_outcomes.append(ProviderOutcomeItem(
+                provider_id=res.outcome.provider_id,
+                status=res.outcome.status.value,
+                result_count=res.outcome.result_count,
+                duration_ms=res.outcome.duration_ms,
+                retryable=res.outcome.retryable,
+                diagnostic=res.outcome.diagnostic,
+                last_successful_check=res.outcome.last_successful_check,
+            ))
+
+    if "hackernews" in req.providers:
+        hn = HackerNewsProvider()
+        res = await hn.search(norm, max_results=10)
         all_provider_results.extend(res)
         if res.outcome:
             provider_outcomes.append(ProviderOutcomeItem(
