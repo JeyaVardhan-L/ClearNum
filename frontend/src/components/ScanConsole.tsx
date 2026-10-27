@@ -46,6 +46,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
     duckduckgo: true,
     wikimedia: true,
     hackernews: true,
+    wayback: true,
   });
   const [customUrls, setCustomUrls] = useState("");
   const [scanMessage, setScanMessage] = useState<string | null>(null);
@@ -85,6 +86,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
     if (providers.duckduckgo) activeProviders.push("duckduckgo");
     if (providers.wikimedia) activeProviders.push("wikimedia");
     if (providers.hackernews) activeProviders.push("hackernews");
+    if (providers.wayback) activeProviders.push("wayback");
 
     const targetList = customUrls
       .split("\n")
@@ -254,6 +256,19 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                   <div>
                     <span className="text-xs font-semibold text-slate-200 block">Hacker News (Algolia)</span>
                     <span className="text-[11px] text-[var(--text-dim)]">Official Algolia API querying comments, resumes & public listings.</span>
+                  </div>
+                </label>
+
+                <label className="flex items-start gap-2.5 p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] cursor-pointer hover:border-[var(--border-strong)]">
+                  <input
+                    type="checkbox"
+                    checked={providers.wayback}
+                    onChange={(e) => setProviders({ ...providers, wayback: e.target.checked })}
+                    className="mt-0.5 accent-sky-500 rounded"
+                  />
+                  <div>
+                    <span className="text-xs font-semibold text-slate-200 block">Internet Archive (Wayback CDX)</span>
+                    <span className="text-[11px] text-[var(--text-dim)]">Official CDX API searching historical pastes, forums & directory archives.</span>
                   </div>
                 </label>
               </div>

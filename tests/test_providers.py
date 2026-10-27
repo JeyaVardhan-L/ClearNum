@@ -9,6 +9,7 @@ from backend.app.engines.discovery.providers import (
     SearXNGProvider,
     WikimediaProvider,
     HackerNewsProvider,
+    WaybackProvider,
     ProviderStatus,
     ProviderOutcome,
     SearchExecutionResult,
@@ -339,3 +340,89 @@ async def test_hackernews_unreachable_on_error(valid_phone):
         assert len(res) == 0
         assert res.outcome.status == ProviderStatus.UNREACHABLE
         assert res.outcome.retryable is True
+
+
+# --- Internet Archive Wayback CDX Provider Tests ---
+
+@pytest.mark.asyncio
+async def test_wayback_healthy_with_results(valid_phone):
+    fake_cdx = [
+        ["original", "timestamp", "mimetype", "statuscode"],
+        ["https://pastebin.com/raw/4155552671", "20220412153000", "text/plain", "200"],
+        ["https://directory.example.org/staff/4155552671", "20230115082000", "text/html", "200"],
+    ]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_cdx
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WaybackProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 2
+        assert "web.archive.org/web/20220412153000" in res[0].url
+        assert "pastebin.com" in res[0].title
+        assert "2022-04-12" in res[0].title
+        assert res.outcome.status == ProviderStatus.HEALTHY
+        assert res.outcome.result_count == 2
+        assert res.outcome.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_wayback_empty_results(valid_phone):
+    fake_cdx = [["original", "timestamp", "mimetype", "statuscode"]]
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.return_value = fake_cdx
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WaybackProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.HEALTHY
+        assert res.outcome.result_count == 0
+
+
+@pytest.mark.asyncio
+async def test_wayback_rate_limited_http_429(valid_phone):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 429
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WaybackProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.RATE_LIMITED
+        assert res.outcome.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_wayback_unreachable_on_timeout(valid_phone):
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=httpx.TimeoutException("Timeout")):
+        provider = WaybackProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.UNREACHABLE
+        assert res.outcome.retryable is True
+
+
+@pytest.mark.asyncio
+async def test_wayback_malformed_json(valid_phone):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 200
+    mock_resp.json.side_effect = ValueError("Invalid JSON")
+
+    with patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_resp):
+        provider = WaybackProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome.status == ProviderStatus.MALFORMED_RESPONSE
+        assert res.outcome.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_wayback_unsupported_on_invalid_phone(invalid_phone):
+    provider = WaybackProvider()
+    res = await provider.search(invalid_phone)
+    assert len(res) == 0
+    assert res.outcome.status == ProviderStatus.UNSUPPORTED
+    assert res.outcome.retryable is False

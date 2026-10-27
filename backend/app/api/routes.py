@@ -16,6 +16,7 @@ from backend.app.engines.discovery.providers import (
     DuckDuckGoProvider,
     WikimediaProvider,
     HackerNewsProvider,
+    WaybackProvider,
     generate_manual_dorks,
     ProviderResult,
     ProviderStatus,
@@ -123,6 +124,7 @@ async def scan_discovery_endpoint(req: ScanRequest):
         "duckduckgo": (DuckDuckGoProvider, 12),
         "wikimedia": (WikimediaProvider, 10),
         "hackernews": (HackerNewsProvider, 10),
+        "wayback": (WaybackProvider, 10),
     }
 
     for p_id in req.providers:
