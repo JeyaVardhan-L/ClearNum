@@ -11,6 +11,7 @@ from urllib.parse import quote
 import httpx
 
 from backend.app.core.security import mask_phone_number
+from backend.app.core.ssrf import validate_url_safe, SSRFSafeTransport, SSRFValidationError
 from backend.app.engines.discovery.normalizer import NormalizedPhone
 from backend.app.engines.discovery.providers.base import (
     SearchProvider,
@@ -81,7 +82,9 @@ class WikimediaProvider(SearchProvider):
         logger.info(f"Querying Wikimedia API for {masked}")
 
         try:
-            async with httpx.AsyncClient(timeout=self.timeout) as client:
+            validate_url_safe(self.endpoint)
+            transport = SSRFSafeTransport(verify=True)
+            async with httpx.AsyncClient(transport=transport, timeout=self.timeout, follow_redirects=False, trust_env=False) as client:
                 resp = await client.get(self.endpoint, params=params, headers=headers)
 
                 duration_ms = int((time.perf_counter() - start_time) * 1000)

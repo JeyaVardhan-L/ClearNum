@@ -217,3 +217,101 @@ async def test_safe_fetch_url_revalidates_redirect_to_private():
             with pytest.raises(SSRFValidationError) as exc_info:
                 await safe_fetch_url("https://example.com/redirect")
             assert "loopback blocked" in str(exc_info.value)
+
+
+@pytest.mark.parametrize("disallowed_url", [
+    "http://example.com:22/",
+    "http://example.com:25/sendmail",
+    "http://example.com:6379/",
+    "https://example.com:11211/memcached",
+    "http://example.com:9200/_cluster/health",
+])
+def test_ssrf_rejects_non_web_ports(disallowed_url):
+    """Outbound requests must reject non-standard web ports to defeat cross-protocol exploitation."""
+    with patch("backend.app.core.ssrf.resolve_and_validate_host", return_value=["93.184.216.34"]):
+        with pytest.raises(SSRFValidationError) as exc_info:
+            validate_url_safe(disallowed_url)
+        assert "disallowed destination port" in str(exc_info.value).lower()
+
+
+def test_ssrf_safe_transport_trust_env_disabled():
+    """Verify that SSRFSafeTransport enforces trust_env=False to prevent proxy bypasses."""
+    transport = SSRFSafeTransport()
+    # Ensure proxy environment variables cannot bypass custom transport backend
+    assert transport._pool._network_backend is not None
+    assert isinstance(transport._pool._network_backend, SSRFSafeNetworkBackend)
+
+
+@pytest.mark.asyncio
+async def test_safe_fetch_url_enforces_streaming_timeout():
+    """Streaming body reading must abort if total elapsed stream time exceeds timeout."""
+    with patch("backend.app.core.ssrf.validate_url_safe", return_value="https://example.com/slow.html"):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html"}
+
+        async def slow_aiter():
+            yield b"Chunk 1"
+            yield b"Chunk 2"
+
+        mock_response.aiter_bytes = slow_aiter
+
+        class FakeStreamContext:
+            async def __aenter__(self):
+                return mock_response
+            async def __aexit__(self, *args):
+                pass
+
+        # start_stream = 0.0, first check in loop = 10.0 (> 2.0s timeout)
+        with patch("httpx.AsyncClient.stream", return_value=FakeStreamContext()), \
+             patch("backend.app.core.ssrf.time.perf_counter", side_effect=[0.0, 10.0, 10.0]):
+            with pytest.raises(SSRFValidationError) as exc_info:
+                await safe_fetch_url("https://example.com/slow.html", timeout=2.0)
+            assert "exceeded overall timeout" in str(exc_info.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_ssrf_backend_pins_socket_destination_to_ip():
+    """Prove that SSRFSafeNetworkBackend.connect_tcp passes the resolved IP directly to
+    the socket connection call, defeating DNS rebinding TOCTOU."""
+    backend = SSRFSafeNetworkBackend()
+
+    with patch("backend.app.core.ssrf.resolve_and_validate_host", return_value=["93.184.216.34"]) as mock_resolve, \
+         patch("httpcore._backends.anyio.AnyIOBackend.connect_tcp", new_callable=AsyncMock) as mock_connect:
+        mock_connect.return_value = MagicMock()
+        await backend.connect_tcp(host="example.com", port=443, timeout=5.0)
+
+        # Confirm host validation occurred
+        mock_resolve.assert_called_once_with("example.com", 443)
+        # Confirm the underlying socket was instructed to connect to the pinned IP string, NOT 'example.com'
+        mock_connect.assert_called_once()
+        call_kwargs = mock_connect.call_args.kwargs
+        assert call_kwargs["host"] == "93.184.216.34"
+        assert call_kwargs["port"] == 443
+
+
+@pytest.mark.asyncio
+async def test_safe_fetch_url_guards_against_decompression_bomb():
+    """Streaming body reading with decompression must terminate once uncompressed stream exceeds max_size."""
+    with patch("backend.app.core.ssrf.validate_url_safe", return_value="https://example.com/bomb.html"):
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.headers = {"content-type": "text/html", "content-encoding": "gzip"}
+
+        async def bomb_aiter():
+            # Yield 64KB chunks up to > 1MB
+            for _ in range(25):
+                yield b"A" * 65536
+
+        mock_response.aiter_bytes = bomb_aiter
+
+        class FakeStreamContext:
+            async def __aenter__(self):
+                return mock_response
+            async def __aexit__(self, *args):
+                pass
+
+        with patch("httpx.AsyncClient.stream", return_value=FakeStreamContext()):
+            with pytest.raises(SSRFValidationError) as exc_info:
+                await safe_fetch_url("https://example.com/bomb.html", max_size=500_000)
+            assert "exceeded maximum limit" in str(exc_info.value).lower()

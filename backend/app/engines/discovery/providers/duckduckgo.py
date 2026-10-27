@@ -10,6 +10,7 @@ from urllib.parse import parse_qs, urlparse, unquote
 import httpx
 from bs4 import BeautifulSoup
 from backend.app.core.security import mask_phone_number
+from backend.app.core.ssrf import SSRFSafeTransport
 from backend.app.engines.discovery.normalizer import NormalizedPhone
 from backend.app.engines.discovery.providers.base import (
     SearchProvider,
@@ -72,7 +73,8 @@ class DuckDuckGoProvider(SearchProvider):
         data = {"q": query, "b": ""}
 
         try:
-            async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+            transport = SSRFSafeTransport(verify=True)
+            async with httpx.AsyncClient(transport=transport, timeout=8.0, follow_redirects=False, trust_env=False) as client:
                 resp = await client.post(endpoint, data=data, headers=headers)
                 duration_ms = int((time.perf_counter() - start_time) * 1000)
 

@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 import httpx
 from backend.app.core.config import settings
 from backend.app.core.security import mask_phone_number
-from backend.app.core.ssrf import validate_url_safe
+from backend.app.core.ssrf import validate_url_safe, SSRFSafeTransport, SSRFValidationError
 from backend.app.engines.discovery.normalizer import NormalizedPhone
 from backend.app.engines.discovery.providers.base import (
     SearchProvider,
@@ -86,7 +86,8 @@ class SearXNGProvider(SearchProvider):
                     "language": "all",
                 }
 
-                async with httpx.AsyncClient(timeout=8.0, follow_redirects=True) as client:
+                transport = SSRFSafeTransport(verify=True)
+                async with httpx.AsyncClient(transport=transport, timeout=8.0, follow_redirects=False, trust_env=False) as client:
                     resp = await client.get(endpoint, params=params)
                     duration_ms = int((time.perf_counter() - start_time) * 1000)
 

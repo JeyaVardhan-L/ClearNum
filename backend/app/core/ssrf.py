@@ -8,6 +8,7 @@ revalidates redirect destinations, checks Content-Type, and bounds response size
 
 import ipaddress
 import socket
+import time
 from urllib.parse import urlparse
 import httpx
 import httpcore
@@ -66,6 +67,8 @@ PERMITTED_CONTENT_TYPES = (
     "text/xml",
     "application/json",
 )
+
+PERMITTED_WEB_PORTS = {80, 443, 8080, 8443}
 
 
 class SSRFValidationError(Exception):
@@ -237,6 +240,10 @@ def validate_url_safe(url: str) -> str:
         raise SSRFValidationError("URL missing hostname")
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    if port not in PERMITTED_WEB_PORTS:
+        raise SSRFValidationError(
+            f"Disallowed destination port '{port}'. Only standard web ports {sorted(list(PERMITTED_WEB_PORTS))} are permitted."
+        )
     resolve_and_validate_host(hostname, port)
     return url.strip()
 
@@ -311,10 +318,15 @@ async def safe_fetch_url(
                             f"Response size {content_length} bytes exceeds maximum limit {max_size} bytes"
                         )
 
-                    # Stream content with hard byte cap
+                    # Stream content with hard byte cap and overall elapsed timeout
                     body_chunks = []
                     total_bytes = 0
+                    start_stream = time.perf_counter()
                     async for chunk in response.aiter_bytes():
+                        if time.perf_counter() - start_stream > timeout:
+                            raise SSRFValidationError(
+                                f"Response stream exceeded overall timeout of {timeout}s"
+                            )
                         total_bytes += len(chunk)
                         if total_bytes > max_size:
                             raise SSRFValidationError(
