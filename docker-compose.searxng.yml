@@ -1,0 +1,31 @@
+# Optional Local SearXNG Profile for ClearNum / NumberShield
+#
+# IMPORTANT: ClearNum does NOT require Docker or SearXNG.
+# All discovery, remediation, and verification workflows function fully offline
+# or with direct zero-cost public providers (DuckDuckGo, Wikimedia, Hacker News, Wayback CDX).
+#
+# If you choose to run local SearXNG, this configuration binds EXCLUSIVELY to 127.0.0.1.
+
+services:
+  searxng:
+    image: docker.io/searxng/searxng:latest
+    container_name: numbershield-searxng
+    restart: unless-stopped
+    ports:
+      # Strict localhost binding: never expose to 0.0.0.0 or external networks
+      - "127.0.0.1:8888:8080"
+    volumes:
+      - ./searxng:/etc/searxng:rw
+    environment:
+      - SEARXNG_BASE_URL=http://127.0.0.1:8888/
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - SETGID
+      - SETUID
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "2m"
+        max-file: "2"

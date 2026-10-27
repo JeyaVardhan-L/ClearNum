@@ -68,7 +68,7 @@ PERMITTED_CONTENT_TYPES = (
     "application/json",
 )
 
-PERMITTED_WEB_PORTS = {80, 443, 8080, 8443}
+PERMITTED_WEB_PORTS = {80, 443, 8080, 8443, 8888}
 
 
 class SSRFValidationError(Exception):
@@ -111,7 +111,7 @@ def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> tuple[bo
     return True, ""
 
 
-def resolve_and_validate_host(hostname: str, port: int = 80) -> list[str]:
+def resolve_and_validate_host(hostname: str, port: int = 80, allow_loopback: bool = False) -> list[str]:
     """Resolves DNS for a hostname and verifies every resolved IPv4 and IPv6 record.
     Returns the list of validated IP strings or raises SSRFValidationError.
     """
@@ -120,12 +120,17 @@ def resolve_and_validate_host(hostname: str, port: int = 80) -> list[str]:
         raise SSRFValidationError("Hostname cannot be empty")
 
     if clean_host in BLOCKED_HOSTNAMES:
-        raise SSRFValidationError(f"Access to '{hostname}' is blocked for SSRF prevention.")
+        if allow_loopback and clean_host in {"localhost", "127.0.0.1", "::1"}:
+            pass  # Allowed explicitly for operator-configured local service
+        else:
+            raise SSRFValidationError(f"Access to '{hostname}' is blocked for SSRF prevention.")
 
     # Check for direct integer/hex/decimal IP bypasses
     if clean_host.isdigit():
         try:
             int_ip = ipaddress.ip_address(int(clean_host))
+            if allow_loopback and int_ip.is_loopback:
+                return [str(int_ip)]
             allowed, reason = is_ip_allowed(int_ip)
             if not allowed:
                 raise SSRFValidationError(f"Target '{hostname}' resolves to blocked IP: {reason}")
@@ -136,6 +141,8 @@ def resolve_and_validate_host(hostname: str, port: int = 80) -> list[str]:
     # Check if host is already a direct IP address
     try:
         direct_ip = ipaddress.ip_address(clean_host)
+        if allow_loopback and direct_ip.is_loopback:
+            return [str(direct_ip)]
         allowed, reason = is_ip_allowed(direct_ip)
         if not allowed:
             raise SSRFValidationError(f"Target '{hostname}' is a blocked address: {reason}")
@@ -159,6 +166,11 @@ def resolve_and_validate_host(hostname: str, port: int = 80) -> list[str]:
         except ValueError:
             raise SSRFValidationError(f"Invalid resolved IP '{ip_str}'")
 
+        if allow_loopback and ip_obj.is_loopback:
+            if ip_str not in validated_ips:
+                validated_ips.append(ip_str)
+            continue
+
         allowed, reason = is_ip_allowed(ip_obj)
         if not allowed:
             raise SSRFValidationError(
@@ -178,6 +190,9 @@ class SSRFSafeNetworkBackend(AnyIOBackend):
     and pins the socket connection directly to the validated IP to defeat DNS rebinding.
     """
 
+    def __init__(self, allow_loopback: bool = False):
+        self.allow_loopback = allow_loopback
+
     async def connect_tcp(
         self,
         host: str,
@@ -186,7 +201,10 @@ class SSRFSafeNetworkBackend(AnyIOBackend):
         local_address: str | None = None,
         socket_options=None,
     ):
-        validated_ips = resolve_and_validate_host(host, port)
+        if self.allow_loopback:
+            validated_ips = resolve_and_validate_host(host, port, allow_loopback=True)
+        else:
+            validated_ips = resolve_and_validate_host(host, port)
         chosen_ip = validated_ips[0]
         # Connect directly to the validated IP, bypassing any second DNS resolution
         return await super().connect_tcp(
@@ -203,7 +221,7 @@ class SSRFSafeTransport(httpx.AsyncHTTPTransport):
     to ensure fresh socket validation and eliminate DNS rebinding TOCTOU windows.
     """
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, allow_loopback: bool = False, **kwargs):
         # Force trust_env to False to prevent proxy environment bypasses
         kwargs["trust_env"] = False
         super().__init__(*args, **kwargs)
@@ -218,12 +236,12 @@ class SSRFSafeTransport(httpx.AsyncHTTPTransport):
             retries=0,
             local_address=self._pool._local_address,
             uds=self._pool._uds,
-            network_backend=SSRFSafeNetworkBackend(),
+            network_backend=SSRFSafeNetworkBackend(allow_loopback=allow_loopback),
             socket_options=self._pool._socket_options,
         )
 
 
-def validate_url_safe(url: str) -> str:
+def validate_url_safe(url: str, allow_loopback: bool = False) -> str:
     """Validates that a URL uses http/https, has a valid hostname, and resolves
     strictly to permitted public network addresses.
     Returns the validated URL string or raises SSRFValidationError.
@@ -244,7 +262,10 @@ def validate_url_safe(url: str) -> str:
         raise SSRFValidationError(
             f"Disallowed destination port '{port}'. Only standard web ports {sorted(list(PERMITTED_WEB_PORTS))} are permitted."
         )
-    resolve_and_validate_host(hostname, port)
+    if allow_loopback:
+        resolve_and_validate_host(hostname, port, allow_loopback=True)
+    else:
+        resolve_and_validate_host(hostname, port)
     return url.strip()
 
 

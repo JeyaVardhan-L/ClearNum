@@ -76,17 +76,20 @@ class SearXNGProvider(SearchProvider):
         for base_url in instances[:2]:
             clean_base = base_url.rstrip("/")
             endpoint = f"{clean_base}/search"
+            is_configured_local = bool(self.instance_url and clean_base == self.instance_url.rstrip("/"))
+            parsed_host = urlparse(clean_base).netloc.lower().split(":")[0].strip("[]")
+            allow_loopback = is_configured_local and (parsed_host in ("127.0.0.1", "localhost", "::1"))
 
             try:
                 # SSRF validate instance endpoint
-                validate_url_safe(endpoint)
+                validate_url_safe(endpoint, allow_loopback=allow_loopback)
                 params = {
                     "q": query,
                     "format": "json",
                     "language": "all",
                 }
 
-                transport = SSRFSafeTransport(verify=True)
+                transport = SSRFSafeTransport(verify=True, allow_loopback=allow_loopback)
                 async with httpx.AsyncClient(transport=transport, timeout=8.0, follow_redirects=False, trust_env=False) as client:
                     resp = await client.get(endpoint, params=params)
                     duration_ms = int((time.perf_counter() - start_time) * 1000)

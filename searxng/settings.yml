@@ -1,0 +1,26 @@
+# Minimal SearXNG configuration for local NumberShield discovery
+use_default_settings: true
+
+server:
+  secret_key: "numbershield_local_research_key_change_in_production"
+  bind_address: "0.0.0.0"
+  port: 8080
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  formats:
+    - html
+    - json
+
+# Only query engines with lawful, non-intrusive public indexes
+engines:
+  - name: duckduckgo
+    engine: duckduckgo
+    enable_http: true
+  - name: wikipedia
+    engine: wikipedia
+    enable_http: true
+  - name: wikidata
+    engine: wikidata
+    enable_http: true
