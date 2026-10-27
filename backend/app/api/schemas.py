@@ -64,6 +64,7 @@ class ScanResponse(BaseModel):
     exposures: List[DiscoveredExposureItem]
     manual_dorks_count: int
     provider_outcomes: List[ProviderOutcomeItem] = Field(default_factory=list)
+    scan_status: str = Field(default="complete", description="'complete', 'partial_failure', or 'all_failed'")
 
 
 class ManualDorkItem(BaseModel):

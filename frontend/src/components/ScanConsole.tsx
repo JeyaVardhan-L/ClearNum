@@ -94,7 +94,13 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
     try {
       const res = await scanDiscovery(parseData.e164 || phoneNumber, region, activeProviders, targetList);
       setProviderOutcomes(res.provider_outcomes || []);
-      setScanMessage(`Scan complete: Discovered ${res.total_found} potential exposure records.`);
+      if (res.scan_status === "partial_failure") {
+        setScanMessage(`Scan completed with warnings: Some providers were rate-limited or unreachable. Discovered ${res.total_found} potential exposure records.`);
+      } else if (res.scan_status === "all_failed") {
+        setScanMessage(`Scan incomplete: All queried search providers failed or were rate-limited. See provider diagnostics below.`);
+      } else {
+        setScanMessage(`Scan complete: Discovered ${res.total_found} potential exposure records across all queried providers.`);
+      }
       onScanComplete(parseData);
     } catch (err: any) {
       setScanMessage(`Scan completed with local fallback: ${err.message}`);

@@ -18,6 +18,7 @@ from backend.app.engines.discovery.providers import (
     HackerNewsProvider,
     generate_manual_dorks,
     ProviderResult,
+    ProviderStatus,
 )
 from backend.app.engines.discovery.local_parsers import (
     parse_mbox_file,
@@ -29,6 +30,7 @@ from backend.app.engines.remediation import (
     validate_transition,
     ActionState,
     InvalidStateTransitionError,
+    EVIDENCE_RULES,
     generate_ccpa_opt_out,
     generate_gdpr_erasure,
     generate_tcpa_ftc_complaint,
@@ -297,6 +299,15 @@ async def scan_discovery_endpoint(req: ScanRequest):
 
     dorks = generate_manual_dorks(norm)
 
+    # Calculate overall scan status
+    healthy_count = sum(1 for p in provider_outcomes if getattr(p, "status", "") in ("healthy", ProviderStatus.HEALTHY))
+    if not provider_outcomes or healthy_count == len(provider_outcomes):
+        scan_status = "complete"
+    elif healthy_count == 0:
+        scan_status = "all_failed"
+    else:
+        scan_status = "partial_failure"
+
     return ScanResponse(
         identity_hmac=norm.hmac_id,
         masked_phone=norm.masked_display,
@@ -304,6 +315,7 @@ async def scan_discovery_endpoint(req: ScanRequest):
         exposures=discovered_items,
         manual_dorks_count=len(dorks),
         provider_outcomes=provider_outcomes,
+        scan_status=scan_status,
     )
 
 
@@ -414,6 +426,26 @@ def transition_action_endpoint(req: TransitionActionRequest):
             notes = COALESCE(?, notes), updated_at = ?
         WHERE id = ?
     """, (req.next_state, req.submission_ref, req.notes, now_iso, action_id))
+
+    # Log immutable state transition into action_audit_log
+    audit_id = str(uuid.uuid4())
+    evidence_rule = EVIDENCE_RULES.get(req.next_state)
+    ev_type = evidence_rule.required_evidence_type if evidence_rule else "USER_TRANSITION"
+    ev_notes = req.notes or (f"Submission reference: {req.submission_ref}" if req.submission_ref else "User initiated transition")
+    cursor.execute("""
+        INSERT INTO action_audit_log (
+            id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        audit_id,
+        action_id,
+        req.identity_hmac,
+        current_status,
+        req.next_state,
+        ev_type,
+        ev_notes,
+        now_iso,
+    ))
 
     conn.commit()
     conn.close()
@@ -733,6 +765,14 @@ def export_audit_endpoint(identity_hmac: str):
 
     cursor.execute("SELECT * FROM spam_incidents WHERE identity_hmac = ?", (identity_hmac,))
     incidents = [dict(r) for r in cursor.fetchall()]
+
+    cursor.execute("""
+        SELECT id, action_id, from_state, to_state, evidence_type, evidence_notes, created_at
+        FROM action_audit_log
+        WHERE identity_hmac = ?
+        ORDER BY created_at ASC
+    """, (identity_hmac,))
+    audit_trail = [dict(r) for r in cursor.fetchall()]
     conn.close()
 
     metrics = calculate_metrics(identity_hmac)
@@ -757,6 +797,7 @@ def export_audit_endpoint(identity_hmac: str):
         "exposures": exposures,
         "subscriptions": subscriptions,
         "spam_incidents": incidents,
+        "audit_trail": audit_trail,
     }
 
 

@@ -78,12 +78,24 @@ def test_synthetic_scenario_and_metrics_flow():
     })
     assert trans_resp.status_code == 200
 
+    # 3b. Verify audit trail recorded in privacy export
+    export_resp = client.get(f"/api/privacy/export?identity_hmac={hmac_id}")
+    assert export_resp.status_code == 200
+    export_data = export_resp.json()
+    assert "audit_trail" in export_data
+    assert len(export_data["audit_trail"]) >= 1
+    latest_audit = export_data["audit_trail"][-1]
+    assert latest_audit["to_state"] == "ACKNOWLEDGED"
+    assert latest_audit["evidence_type"] == "CONFIRMATION_RECEIPT"
+    assert "TEST-REF-999" in latest_audit["evidence_notes"] or "Acknowledged" in latest_audit["evidence_notes"]
+
     # 4. Check metrics
     metric_resp = client.get(f"/api/prevention/metrics?identity_hmac={hmac_id}")
     assert metric_resp.status_code == 200
     metrics = metric_resp.json()
     assert metrics["total_exposures"] == 5
     assert metrics["verified_removed"] >= 1
+
 
 
 def test_purge_endpoint():

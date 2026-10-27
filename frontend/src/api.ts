@@ -41,6 +41,7 @@ export async function scanDiscovery(
   total_found: number;
   manual_dorks_count?: number;
   provider_outcomes?: ProviderOutcome[];
+  scan_status?: "complete" | "partial_failure" | "all_failed";
 }> {
   const res = await fetch(`${API_BASE}/discovery/scan`, {
     method: "POST",

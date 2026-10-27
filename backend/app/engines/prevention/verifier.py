@@ -111,13 +111,21 @@ async def verify_exposure_url(
 
 
 def _update_remediation_action_record(exposure_id: str, outcome: VerificationOutcome) -> None:
-    """Updates the remediation_actions table with the verification outcome."""
+    """Updates the remediation_actions table with the verification outcome and logs to action_audit_log."""
+    import uuid
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    cursor.execute("SELECT status FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
+    cursor.execute("SELECT id, identity_hmac, status FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
     act_row = cursor.fetchone()
-    current_status = act_row["status"] if act_row else "DISCOVERED"
+    if not act_row:
+        conn.close()
+        return
+
+    action_id = act_row["id"]
+    identity_hmac = act_row["identity_hmac"]
+    current_status = act_row["status"] or "DISCOVERED"
+    new_status = None
 
     if outcome.status == "NO_LONGER_VISIBLE_AT_CHECKED_URL":
         if current_status in ("SUBMITTED", "ACKNOWLEDGED", "AWAITING_VERIFICATION", "PENDING", "AWAITING_USER_APPROVAL", "ACTION_AVAILABLE"):
@@ -160,11 +168,12 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
     elif outcome.status == "STILL_VISIBLE":
         if current_status in ("DISCOVERED", "AWAITING_USER_REVIEW"):
             # Live scan confirmed telephone number presence on page: upgrade to CONFIRMED_EXPOSURE
+            new_status = "CONFIRMED_EXPOSURE"
             cursor.execute("""
                 UPDATE remediation_actions
-                SET status = 'CONFIRMED_EXPOSURE', notes = ?, updated_at = ?
+                SET status = ?, notes = ?, updated_at = ?
                 WHERE exposure_id = ?
-            """, (outcome.evidence_notes, outcome.verified_at, exposure_id))
+            """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
         else:
             # If was previously NO_LONGER_VISIBLE, mark as REAPPEARED!
             if current_status in ("NO_LONGER_VISIBLE_AT_CHECKED_URL", "VERIFIED_REMOVED"):
@@ -176,6 +185,24 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
                 SET status = ?, notes = ?, updated_at = ?
                 WHERE exposure_id = ? AND status != 'SOURCE_CONFIRMED_REMOVAL'
             """, (new_status, outcome.evidence_notes, outcome.verified_at, exposure_id))
+
+    # If state transitioned, write immutable forensic audit trail entry
+    if new_status and new_status != current_status:
+        audit_id = str(uuid.uuid4())
+        cursor.execute("""
+            INSERT INTO action_audit_log (
+                id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            audit_id,
+            action_id,
+            identity_hmac,
+            current_status,
+            new_status,
+            "HTTP_LIVE_VERIFICATION",
+            outcome.evidence_notes,
+            outcome.verified_at,
+        ))
 
     # Update last_checked_at on exposure
     cursor.execute("""

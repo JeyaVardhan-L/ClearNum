@@ -10,6 +10,7 @@ from backend.app.engines.remediation.lifecycle import (
     validate_transition,
     get_state_color_token,
     InvalidStateTransitionError,
+    EVIDENCE_RULES,
 )
 from backend.app.engines.remediation.templates import (
     GeneratedTemplate,
