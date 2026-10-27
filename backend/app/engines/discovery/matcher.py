@@ -6,6 +6,8 @@ into EXACT, PROBABLE, WEAK, or FALSE_POSITIVE tiers with sanitized snippets.
 import re
 from dataclasses import dataclass
 from typing import Optional, Tuple
+import html
+import unicodedata
 from bs4 import BeautifulSoup
 from backend.app.engines.discovery.normalizer import NormalizedPhone
 
@@ -27,19 +29,24 @@ ISBN_PATTERN = re.compile(r"\b(?:978|979)[- ]?\d{1,5}[- ]?\d{1,7}[- ]?\d{1,7}[- 
 
 def sanitize_html_to_text(html_content: str) -> str:
     """Safely extracts clean plain text from HTML, stripping all script,
-    style, and markup elements to prevent XSS.
+    style, and markup elements, decoding HTML entities, and normalizing
+    Unicode characters (NFKC) to prevent evasion and false negatives.
     """
     if not html_content:
         return ""
+    # Decode HTML entities (e.g. &#43;1-415-555-2671 -> +1-415-555-2671)
+    unescaped = html.unescape(html_content)
+    # NFKC normalizes fullwidth characters (e.g. ＋１４１５５５５２６７１ -> +14155552671)
+    normalized = unicodedata.normalize("NFKC", unescaped)
     try:
-        soup = BeautifulSoup(html_content, "html.parser")
+        soup = BeautifulSoup(normalized, "html.parser")
         for tag in soup(["script", "style", "noscript", "header", "footer"]):
             tag.decompose()
         text = soup.get_text(separator=" ", strip=True)
         return re.sub(r"\s+", " ", text)
     except Exception:
         # Fallback regex tag stripping
-        clean = re.sub(r"<[^>]+>", " ", html_content)
+        clean = re.sub(r"<[^>]+>", " ", normalized)
         return re.sub(r"\s+", " ", clean).strip()
 
 

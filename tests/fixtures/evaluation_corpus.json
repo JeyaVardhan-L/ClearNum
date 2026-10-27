@@ -152,5 +152,93 @@
     "expected_matched": true,
     "expected_tier": "EXACT",
     "is_negative_control": false
+  },
+  {
+    "id": "eval_15_off_by_one_near_miss",
+    "name": "Adversarial: Similar Number Differing by One Digit",
+    "origin": "Near-miss negative control (ends in 2672 instead of 2671)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "For billing questions contact 415-555-2672 or email support@example.com.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_16_multiple_numbers_in_doc",
+    "name": "Adversarial: Multiple Unrelated Numbers in Document",
+    "origin": "Multi-contact directory listing with target phone among decoys",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Main desk: 212-555-0199. Secondary line: 415-555-2671. Fax line: 415-555-9999.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_17_unicode_fullwidth_digits",
+    "name": "Adversarial: Unicode Fullwidth / Asian Typography Digits",
+    "origin": "East Asian typography with fullwidth Unicode digits",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "緊急連絡先: ＋１４１５５５５２６７１ までご連絡ください。",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_18_discussion_quote_context",
+    "name": "Context: Number in Discussion / Forum Quotation",
+    "origin": "Forum post quoting a reported scammer or discussion context",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "> John wrote: 'Is this the caller ID: 415-555-2671?'\nNo, that was reported as a spoofed robocall.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_19_nanp_reserved_test_number",
+    "name": "Documentation: Fictitious 555-01xx Documentation Example",
+    "origin": "NANP officially reserved fictional example number in developer docs",
+    "phone_input": "+14155550199",
+    "region": "US",
+    "content": "Sample API documentation: request payload example includes phone: '+14155550199' for testing.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_20_html_entity_encoded",
+    "name": "Adversarial: HTML Decimal Entity Encoded Phone Number",
+    "origin": "Obfuscated web contact protected by HTML decimal entities",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<p>Customer service: &#43;1&#45;415&#45;555&#45;2671</p>",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_21_stale_404_page_negative",
+    "name": "Negative Control: Stale / Inaccessible 404 Page",
+    "origin": "Removed page containing standard 404 message without personal phone",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<html><head><title>404 Not Found</title></head><body><h1>404 Not Found</h1><p>The profile you are looking for has been removed permanently.</p></body></html>",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_22_ambiguous_regional_different_country",
+    "name": "Negative Control: Foreign Number with Overlapping Local Digits",
+    "origin": "French telephone number with different country code (+33)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Call Paris branch at +33 1 41 55 52 67 during local European business hours.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
   }
 ]
