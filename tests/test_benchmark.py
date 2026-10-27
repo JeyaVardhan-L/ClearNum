@@ -36,9 +36,9 @@ def test_normalization_benchmark_suite():
 
 def test_provider_adapter_benchmark_suite():
     metrics = run_provider_benchmark()
-    assert metrics.total_adapters == 4
-    assert metrics.scenarios_tested >= 5
-    assert metrics.passed_adapters >= 3
+    assert metrics.total_adapters == 5
+    assert metrics.scenarios_tested >= 6
+    assert metrics.passed_adapters >= 4
 
 
 def test_e2e_pipeline_benchmark_suite():

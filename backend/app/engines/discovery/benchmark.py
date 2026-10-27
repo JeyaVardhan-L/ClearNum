@@ -20,6 +20,7 @@ from backend.app.engines.discovery.providers import (
     SearXNGProvider,
     WikimediaProvider,
     HackerNewsProvider,
+    WaybackProvider,
     ProviderStatus,
 )
 
@@ -313,15 +314,29 @@ def run_provider_benchmark() -> ProviderBenchmarkMetrics:
             if res.outcome and res.outcome.status == ProviderStatus.HEALTHY and len(res) == 1:
                 passed += 1
                 details.append({"adapter": "hackernews", "scenario": "healthy_algolia", "passed": True})
+        # 6. Internet Archive Wayback CDX: healthy search
+        scenarios += 1
+        wayback = WaybackProvider()
+        wayback_json = json.dumps([
+            ["original", "timestamp", "mimetype", "statuscode"],
+            ["https://pastebin.com/raw1", "20220412153000", "text/plain", "200"],
+        ])
+        mock_wb = MagicMock(status_code=200, text=wayback_json, json=lambda: json.loads(wayback_json))
+        with patch("backend.app.engines.discovery.providers.wayback.validate_url_safe", return_value="https://web.archive.org/cdx/search/cdx"), \
+             patch("httpx.AsyncClient.get", new_callable=AsyncMock, return_value=mock_wb):
+            res = await wayback.search(phone)
+            if res.outcome and res.outcome.status == ProviderStatus.HEALTHY and len(res) == 1:
+                passed += 1
+                details.append({"adapter": "wayback", "scenario": "healthy_cdx", "passed": True})
             else:
-                details.append({"adapter": "hackernews", "scenario": "healthy_algolia", "passed": False})
+                details.append({"adapter": "wayback", "scenario": "healthy_cdx", "passed": False})
 
         return scenarios, passed, details
 
     scenarios, passed, details = asyncio.run(_test_adapters())
     return ProviderBenchmarkMetrics(
-        total_adapters=4,
-        passed_adapters=4 if passed == scenarios else (passed // 2),
+        total_adapters=5,
+        passed_adapters=5 if passed == scenarios else (passed // 2),
         scenarios_tested=scenarios,
         details=details,
     )

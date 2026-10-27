@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from backend.app.core.config import settings
 from backend.app.core.database import get_db_connection, init_db, purge_all_data, utc_now_iso
 from backend.app.core.security import compute_phone_hmac, mask_phone_number
+from backend.app.core.ssrf import safe_fetch_url
 from backend.app.engines.discovery import parse_and_normalize, match_phone_in_text
 from backend.app.engines.discovery.providers import (
     SearXNGProvider,
