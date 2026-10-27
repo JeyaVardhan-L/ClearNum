@@ -118,65 +118,29 @@ async def scan_discovery_endpoint(req: ScanRequest):
     provider_outcomes: List[ProviderOutcomeItem] = []
 
     # Run chosen providers
-    if "searxng" in req.providers:
-        searx = SearXNGProvider()
-        res = await searx.search(norm, max_results=12)
-        all_provider_results.extend(res)
-        if res.outcome:
-            provider_outcomes.append(ProviderOutcomeItem(
-                provider_id=res.outcome.provider_id,
-                status=res.outcome.status.value,
-                result_count=res.outcome.result_count,
-                duration_ms=res.outcome.duration_ms,
-                retryable=res.outcome.retryable,
-                diagnostic=res.outcome.diagnostic,
-                last_successful_check=res.outcome.last_successful_check,
-            ))
+    provider_factories = {
+        "searxng": (SearXNGProvider, 12),
+        "duckduckgo": (DuckDuckGoProvider, 12),
+        "wikimedia": (WikimediaProvider, 10),
+        "hackernews": (HackerNewsProvider, 10),
+    }
 
-    if "duckduckgo" in req.providers:
-        ddg = DuckDuckGoProvider()
-        res = await ddg.search(norm, max_results=12)
-        all_provider_results.extend(res)
-        if res.outcome:
-            provider_outcomes.append(ProviderOutcomeItem(
-                provider_id=res.outcome.provider_id,
-                status=res.outcome.status.value,
-                result_count=res.outcome.result_count,
-                duration_ms=res.outcome.duration_ms,
-                retryable=res.outcome.retryable,
-                diagnostic=res.outcome.diagnostic,
-                last_successful_check=res.outcome.last_successful_check,
-            ))
-
-    if "wikimedia" in req.providers:
-        wiki = WikimediaProvider()
-        res = await wiki.search(norm, max_results=10)
-        all_provider_results.extend(res)
-        if res.outcome:
-            provider_outcomes.append(ProviderOutcomeItem(
-                provider_id=res.outcome.provider_id,
-                status=res.outcome.status.value,
-                result_count=res.outcome.result_count,
-                duration_ms=res.outcome.duration_ms,
-                retryable=res.outcome.retryable,
-                diagnostic=res.outcome.diagnostic,
-                last_successful_check=res.outcome.last_successful_check,
-            ))
-
-    if "hackernews" in req.providers:
-        hn = HackerNewsProvider()
-        res = await hn.search(norm, max_results=10)
-        all_provider_results.extend(res)
-        if res.outcome:
-            provider_outcomes.append(ProviderOutcomeItem(
-                provider_id=res.outcome.provider_id,
-                status=res.outcome.status.value,
-                result_count=res.outcome.result_count,
-                duration_ms=res.outcome.duration_ms,
-                retryable=res.outcome.retryable,
-                diagnostic=res.outcome.diagnostic,
-                last_successful_check=res.outcome.last_successful_check,
-            ))
+    for p_id in req.providers:
+        if p_id in provider_factories:
+            cls_factory, max_r = provider_factories[p_id]
+            provider_inst = cls_factory()
+            res = await provider_inst.search(norm, max_results=max_r)
+            all_provider_results.extend(res)
+            if res.outcome:
+                provider_outcomes.append(ProviderOutcomeItem(
+                    provider_id=res.outcome.provider_id,
+                    status=res.outcome.status.value,
+                    result_count=res.outcome.result_count,
+                    duration_ms=res.outcome.duration_ms,
+                    retryable=res.outcome.retryable,
+                    diagnostic=res.outcome.diagnostic,
+                    last_successful_check=res.outcome.last_successful_check,
+                ))
 
     # Process user-supplied target URLs safely with SSRF protection
     if req.target_urls:
@@ -190,11 +154,11 @@ async def scan_discovery_endpoint(req: ScanRequest):
                     match_res = match_phone_in_text(content, norm)
                     if match_res.matched:
                         parsed_u = urlparse(clean_custom)
-                        all_provider_results.append(ProviderResult(
+                        all_provider_results.append(ProviderResult.from_url_and_title(
                             url=clean_custom,
                             title=f"Custom Target [{parsed_u.netloc}]",
                             snippet=match_res.snippet,
-                            source_name="user_target",
+                            provider_id="user_target",
                         ))
             except Exception:
                 pass
