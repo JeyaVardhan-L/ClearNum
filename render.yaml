@@ -1,0 +1,21 @@
+services:
+  - type: web
+    name: clearnum
+    env: python
+    plan: free
+    buildCommand: |
+      pip install -r backend/requirements.txt
+      cd frontend && npm install && npm run build
+    startCommand: |
+      python -m uvicorn backend.app.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11
+      - key: NUMBERSHIELD_HOST
+        value: 0.0.0.0
+      - key: NUMBERSHIELD_PORT
+        value: 8000
+      - key: LOG_LEVEL
+        value: INFO
+    healthCheckPath: /api/health
+    autoDeploy: true

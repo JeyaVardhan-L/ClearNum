@@ -28,9 +28,13 @@ env/
 
 # Environment and sensitive keys
 .env
+.env.local
+.env.*.local
 .numbershield_key
 *.sqlite3
 *.db
+*.db-*
+data/
 temp_imports/
 
 # Testing & Coverage
