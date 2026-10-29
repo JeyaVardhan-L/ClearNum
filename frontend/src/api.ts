@@ -15,6 +15,7 @@ import type {
   DNDCountryGuide,
   SearchRemovalGuide,
   GeneratedTemplate,
+  AnalyzeSmsResult,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -223,6 +224,27 @@ export async function purgeData(): Promise<any> {
 
 export async function loadSyntheticDemo(): Promise<any> {
   const res = await fetch(`${API_BASE}/demo/synthetic`, { method: "POST" });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+
+export async function analyzeSmsMessage(
+  sender: string,
+  messageBody: string = "",
+  region: string = "IN",
+  userPhone: string = ""
+): Promise<AnalyzeSmsResult> {
+  const res = await fetch(`${API_BASE}/discovery/analyze-sms`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      sender,
+      message_body: messageBody,
+      region,
+      user_phone: userPhone,
+    }),
+  });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

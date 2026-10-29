@@ -130,3 +130,30 @@ export interface GeneratedTemplate {
   subject_line: string;
   body_markdown: string;
 }
+
+
+export interface DiscoveredSMSSender {
+  sender_number: string;
+  is_shortcode: boolean;
+  message_count: number;
+  has_opt_out_keyword: boolean;
+  opt_out_command: string;
+  sample_body: string;
+  category: string;
+  brand_name?: string;
+  dlt_prefix?: string;
+  recommended_action?: string;
+}
+
+export interface AnalyzeSmsResult {
+  sender: string;
+  category: string;
+  brand_name: string;
+  dlt_prefix: string;
+  is_shortcode: boolean;
+  has_opt_out_keyword: boolean;
+  opt_out_command: string;
+  recommended_action: string;
+  complaint_sms?: string;
+  merchant_notice?: string;
+}

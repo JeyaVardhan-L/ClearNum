@@ -88,7 +88,7 @@ def test_full_user_workflow_desktop(base_url):
         # 6. Switch to Remediation Hub and test Legal Notice Generator
         nav.locator("button:has-text('Remediation Hub')").click()
         page.wait_for_selector("text=Remediation Hub")
-        assert page.locator("text=FastPeopleSearch").first.is_visible()
+        page.wait_for_selector("text=FastPeopleSearch", timeout=6000)
 
         # Switch to Legal Notice Generator subtab
         page.locator("button:has-text('Legal Notice Generator')").click()

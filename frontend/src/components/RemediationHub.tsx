@@ -94,7 +94,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
     }
   };
 
-  const copyToClipboard = (text: string, type: "body" | "subject" | "field") => {
+  const copyToClipboard = (text: string, type: "body" | "subject") => {
     navigator.clipboard.writeText(text);
     if (type === "body") {
       setCopiedTemplate(true);
@@ -107,7 +107,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
 
   const handleDownloadMarkdown = () => {
     if (!generatedTemplate) return;
-    const content = `# ${generatedTemplate.title}\n\n**Subject:** ${generatedTemplate.subject_line}\n\n---\n\n${generatedTemplate.body_markdown}`;
+    const content = `# ${generatedTemplate.title}\n\n**SUBJECT:** ${generatedTemplate.subject_line}\n\n---\n\n${generatedTemplate.body_markdown}`;
     const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -120,27 +120,27 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
   return (
     <div className="space-y-6">
       {/* Top Banner */}
-      <div className="panel-card p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
+      <div className="card p-4 flex flex-col md:flex-row items-stretch md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-lg bg-sky-950/80 border border-sky-800 flex items-center justify-center text-sky-400">
+          <div className="w-10 h-10 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-app)] flex items-center justify-center text-[var(--pixel-green)]">
             <BookOpen className="w-5 h-5" />
           </div>
           <div>
-            <h2 className="text-base font-bold text-slate-100">Remediation Hub</h2>
-            <p className="text-xs text-[var(--text-muted)]">
+            <h2 className="text-base font-bold text-[var(--text-main)]">Remediation Hub</h2>
+            <p className="text-xs text-[var(--text-muted)] mt-0.5">
               Curated official opt-out procedures, statutory legal templates, and search removal workflows.
             </p>
           </div>
         </div>
 
         {/* Sub-tab Navigation */}
-        <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-lg border border-slate-800 self-start md:self-center">
+        <div className="flex items-center gap-1 bg-[var(--bg-app)] p-1 rounded-lg border border-[var(--border-subtle)] self-start md:self-center">
           <button
             onClick={() => setActiveTab("directory")}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
               activeTab === "directory"
-                ? "bg-slate-800 text-sky-400 shadow-sm border border-slate-700"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-[var(--pixel-green)] text-[#022c22] font-bold shadow-[0_0_12px_rgba(16,185,129,0.35)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
             Broker Directory ({sources.length})
@@ -149,8 +149,8 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
             onClick={() => setActiveTab("templates")}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
               activeTab === "templates"
-                ? "bg-slate-800 text-sky-400 shadow-sm border border-slate-700"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-[var(--pixel-green)] text-[#022c22] font-bold shadow-[0_0_12px_rgba(16,185,129,0.35)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
             Legal Notice Generator
@@ -159,8 +159,8 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
             onClick={() => setActiveTab("searchengines")}
             className={`px-3 py-1.5 rounded-md text-xs font-semibold transition-all ${
               activeTab === "searchengines"
-                ? "bg-slate-800 text-sky-400 shadow-sm border border-slate-700"
-                : "text-slate-400 hover:text-slate-200"
+                ? "bg-[var(--pixel-green)] text-[#022c22] font-bold shadow-[0_0_12px_rgba(16,185,129,0.35)]"
+                : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
             Search Engine De-Indexing
@@ -172,19 +172,19 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
       {activeTab === "directory" && (
         <div className="space-y-4">
           {/* Filter Bar */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 panel-card p-3">
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 card p-3">
             <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-2.5" />
+              <Search className="w-3.5 h-3.5 text-[var(--text-dim)] absolute left-2.5 top-2.5" />
               <input
                 type="text"
-                placeholder="Search brokers (e.g., FastPeopleSearch, Whitepages, Radaris)..."
+                placeholder="Search brokers (e.g. FastPeopleSearch, Whitepages, Radaris)..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 className="input-field pl-8 py-1.5 text-xs"
               />
             </div>
             <div className="flex items-center gap-2">
-              <Filter className="w-3.5 h-3.5 text-slate-400" />
+              <Filter className="w-3.5 h-3.5 text-[var(--text-dim)]" />
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
@@ -201,26 +201,28 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
 
           {/* Broker Cards Grid */}
           {loadingSources ? (
-            <div className="text-center py-12 text-slate-400 text-xs">Loading broker registry...</div>
+            <div className="text-center py-12 text-xs text-[var(--text-dim)]">
+              Loading broker registry...
+            </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredSources.map((source) => (
                 <div
                   key={source.source_id}
-                  className={`panel-card p-4 space-y-3 flex flex-col justify-between ${
-                    selectedSourceId === source.source_id ? "ring-2 ring-sky-500" : ""
+                  className={`card p-4 space-y-3 flex flex-col justify-between ${
+                    selectedSourceId === source.source_id ? "border-[var(--pixel-green)]" : ""
                   }`}
                 >
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     <div className="flex items-start justify-between gap-2">
                       <div>
-                        <h3 className="font-bold text-sm text-slate-100">{source.name}</h3>
-                        <span className="text-[10px] uppercase font-semibold text-sky-400 tracking-wider">
+                        <h3 className="text-sm font-bold text-[var(--text-main)]">{source.name}</h3>
+                        <span className="text-[11px] text-[var(--pixel-cyan)] font-medium">
                           {source.category}
                         </span>
                       </div>
-                      <span className="status-pill pill-neutral text-[10px] flex items-center gap-1">
-                        <Clock className="w-3 h-3 text-slate-400" />
+                      <span className="status-pill pill-pixel-purple text-[9px] flex items-center gap-1">
+                        <Clock className="w-3 h-3" />
                         {source.processing_time_estimate}
                       </span>
                     </div>
@@ -228,7 +230,10 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     {/* Domains */}
                     <div className="flex flex-wrap gap-1">
                       {source.domains.map((d) => (
-                        <span key={d} className="text-[10px] font-mono bg-slate-900 px-1.5 py-0.5 rounded text-slate-300 border border-slate-800">
+                        <span
+                          key={d}
+                          className="font-mono text-[10px] bg-[var(--bg-app)] px-2 py-0.5 rounded border border-[var(--border-subtle)] text-[var(--text-muted)]"
+                        >
                           {d}
                         </span>
                       ))}
@@ -237,39 +242,37 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     {/* Badges for requirements and rights */}
                     <div className="flex flex-wrap gap-1.5 pt-1">
                       {source.requires_email_confirmation && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-950/60 text-amber-300 border border-amber-800 flex items-center gap-1">
+                        <span className="status-pill pill-pixel-yellow text-[9px]">
                           <Mail className="w-2.5 h-2.5" /> Email Confirm Required
                         </span>
                       )}
                       {source.requires_phone_call && (
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-950/60 text-rose-300 border border-rose-800 flex items-center gap-1">
+                        <span className="status-pill pill-pixel-red text-[9px]">
                           <Phone className="w-2.5 h-2.5" /> Phone Call Required
                         </span>
                       )}
                       {source.statutory_rights.map((r) => (
-                        <span key={r} className="text-[10px] px-1.5 py-0.5 rounded bg-sky-950/60 text-sky-300 border border-sky-800">
+                        <span key={r} className="status-pill pill-pixel-cyan text-[9px]">
                           {r}
                         </span>
                       ))}
                     </div>
 
                     {/* Instructions */}
-                    <div className="bg-slate-900/80 p-2.5 rounded border border-slate-800/80 text-xs text-slate-300 space-y-1">
-                      <div className="text-[10px] font-semibold text-slate-400 uppercase tracking-wide">
+                    <div className="bg-[var(--bg-app)] p-3 rounded-lg border border-[var(--border-subtle)] text-xs space-y-1.5">
+                      <div className="text-[10px] font-bold text-[var(--pixel-green)] uppercase tracking-wider">
                         Opt-Out Procedure:
                       </div>
-                      <ol className="list-decimal list-inside space-y-0.5 text-[11px] leading-relaxed">
+                      <ol className="list-decimal list-inside space-y-1 text-[11px] text-[var(--text-muted)] leading-relaxed">
                         {source.instructions.map((step, idx) => (
-                          <li key={idx} className="text-slate-300">
-                            {step}
-                          </li>
+                          <li key={idx}>{step}</li>
                         ))}
                       </ol>
                     </div>
                   </div>
 
                   {/* Actions */}
-                  <div className="pt-2 border-t border-slate-800 flex items-center justify-between gap-2">
+                  <div className="pt-2.5 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
                     {/* Pre-fill clipboard helper */}
                     {currentIdentity && (
                       <button
@@ -279,13 +282,13 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                           setCopiedPreFill(source.source_id);
                           setTimeout(() => setCopiedPreFill(null), 2000);
                         }}
-                        className="btn-secondary text-[11px] py-1 px-2 text-slate-300"
+                        className="btn btn-secondary text-xs py-1.5 px-2.5"
                         title="Copy phone format to clipboard for pasting into broker opt-out form"
                       >
                         {copiedPreFill === source.source_id ? (
-                          <Check className="w-3 h-3 text-emerald-400" />
+                          <Check className="w-3 h-3 text-[var(--pixel-green)]" />
                         ) : (
-                          <Copy className="w-3 h-3 text-slate-400" />
+                          <Copy className="w-3 h-3" />
                         )}
                         <span className="hidden sm:inline">Copy Phone</span>
                       </button>
@@ -295,7 +298,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                       href={source.official_removal_url}
                       target="_blank"
                       rel="noopener noreferrer"
-                      className="btn-primary text-xs py-1.5 px-3 flex-1 flex items-center justify-center gap-1.5"
+                      className="btn btn-primary text-xs py-1.5 px-3 flex-1 flex items-center justify-center gap-1.5"
                     >
                       <ExternalLink className="w-3.5 h-3.5" />
                       <span>Launch Opt-Out Form</span>
@@ -313,26 +316,26 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
           {/* Controls Column */}
           <div className="lg:col-span-5 space-y-4">
-            <div className="panel-card p-5 space-y-4">
+            <div className="card p-5 space-y-4">
               <div>
-                <h3 className="text-sm font-bold text-slate-100 flex items-center gap-2">
-                  <FileText className="w-4 h-4 text-sky-400" />
+                <h3 className="text-sm font-bold text-[var(--text-main)] flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-[var(--pixel-green)]" />
                   Statutory Notice Configuration
                 </h3>
-                <p className="text-xs text-[var(--text-muted)] mt-1">
+                <p className="text-xs text-[var(--text-muted)] mt-1 leading-relaxed">
                   Draft legally enforceable privacy rights demands citing specific consumer protection statutes.
                 </p>
               </div>
 
               {templateError && (
-                <div className="p-3 rounded bg-rose-950/60 border border-rose-800 text-rose-300 text-xs">
+                <div className="p-3 rounded-md border border-rose-500/40 bg-rose-950/20 text-xs text-rose-400">
                   {templateError}
                 </div>
               )}
 
               <form onSubmit={handleGenerateTemplate} className="space-y-3.5">
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
                     Statutory Framework / Legal Basis
                   </label>
                   <select
@@ -349,7 +352,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
                     Recipient Company / Privacy Officer
                   </label>
                   <input
@@ -357,26 +360,26 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     value={recipientName}
                     onChange={(e) => setRecipientName(e.target.value)}
                     className="input-field text-xs"
-                    placeholder="e.g., FastPeopleSearch Legal Team, Acme Corp Marketing"
+                    placeholder="e.g. FastPeopleSearch Legal Team, Acme Corp Marketing"
                   />
                 </div>
 
                 <div>
-                  <label className="text-xs font-semibold text-slate-300 block mb-1">
+                  <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
                     Specific Listing URL (Optional)
                   </label>
                   <input
                     type="text"
                     value={targetUrl}
                     onChange={(e) => setTargetUrl(e.target.value)}
-                    className="input-field text-xs"
+                    className="input-field text-xs font-mono"
                     placeholder="https://www.broker.com/people/j-doe/..."
                   />
                 </div>
 
                 {(templateType === "TCPA_REVOCATION" || templateType === "TRAI_COMMERCIAL") && (
                   <div>
-                    <label className="text-xs font-semibold text-slate-300 block mb-1">
+                    <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
                       Violator Calling / Sender Number (Optional)
                     </label>
                     <input
@@ -392,23 +395,33 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 <button
                   type="submit"
                   disabled={isGenerating}
-                  className="btn-primary w-full text-xs py-2 mt-2"
+                  className="btn btn-primary w-full py-2.5 mt-2 text-xs"
                 >
                   <Sparkles className="w-3.5 h-3.5" />
-                  {isGenerating ? "Compiling Statutory Citations..." : "Generate Privacy Rights Notice"}
+                  <span>
+                    {isGenerating ? "Compiling Statutory Citations..." : "Generate Privacy Rights Notice"}
+                  </span>
                 </button>
               </form>
             </div>
 
-            <div className="panel-card p-4 text-xs text-slate-400 space-y-2 border-slate-800">
-              <div className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <AlertCircle className="w-3.5 h-3.5 text-sky-400" /> Statutory Deadlines
+            <div className="card p-4 space-y-2 border-slate-800 bg-[#0c1424]">
+              <div className="text-xs font-bold text-amber-400 flex items-center gap-1.5 uppercase tracking-wider">
+                <AlertCircle className="w-3.5 h-3.5" /> Statutory Deadlines
               </div>
-              <ul className="list-disc list-inside space-y-1 text-[11px] leading-relaxed">
-                <li><strong className="text-slate-300">CCPA/CPRA:</strong> 45 calendar days to confirm deletion (Civil Code § 1798.105).</li>
-                <li><strong className="text-slate-300">GDPR:</strong> 1 month standard window under Article 12(3).</li>
-                <li><strong className="text-slate-300">TCPA:</strong> Immediate internal DNC recording; up to $500–$1,500 statutory damages per willful violation.</li>
-                <li><strong className="text-slate-300">TRAI 1909:</strong> Commercial sender blacklisting within 7 business days under TCCCPR 2018.</li>
+              <ul className="list-disc list-inside space-y-1.5 text-xs text-[var(--text-muted)] leading-relaxed">
+                <li>
+                  <strong className="text-[var(--text-main)]">CCPA/CPRA:</strong> 45 calendar days to confirm deletion (Civil Code § 1798.105).
+                </li>
+                <li>
+                  <strong className="text-[var(--text-main)]">GDPR:</strong> 1 month standard window under Article 12(3).
+                </li>
+                <li>
+                  <strong className="text-[var(--text-main)]">TCPA:</strong> Immediate internal DNC recording; up to $500–$1,500 statutory damages per willful violation.
+                </li>
+                <li>
+                  <strong className="text-[var(--text-main)]">TRAI 1909:</strong> Commercial sender blacklisting within 7 business days under TCCCPR 2018.
+                </li>
               </ul>
             </div>
           </div>
@@ -416,65 +429,76 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
           {/* Notice Preview Column */}
           <div className="lg:col-span-7">
             {generatedTemplate ? (
-              <div className="panel-card p-5 space-y-4">
-                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-800 pb-3">
+              <div className="card p-5 space-y-4">
+                <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-[var(--border-subtle)] pb-3">
                   <div>
-                    <span className="text-[10px] font-semibold uppercase tracking-wider text-sky-400 bg-sky-950 px-2 py-0.5 rounded border border-sky-800">
-                      {generatedTemplate.template_type}
-                    </span>
-                    <h3 className="text-sm font-bold text-slate-100 mt-1">{generatedTemplate.title}</h3>
+                    <span className="kicker-tag text-[9px]">{generatedTemplate.template_type}</span>
+                    <h3 className="text-sm font-bold text-[var(--text-main)] mt-1">
+                      {generatedTemplate.title}
+                    </h3>
                   </div>
 
                   <div className="flex items-center gap-2">
                     <button
                       onClick={() => copyToClipboard(generatedTemplate.body_markdown, "body")}
-                      className="btn-secondary text-xs py-1.5 px-3"
+                      className="btn btn-secondary text-xs py-1.5 px-3"
                     >
                       {copiedTemplate ? (
                         <>
-                          <Check className="w-3 h-3 text-emerald-400" /> Copied Body
+                          <Check className="w-3 h-3 text-[var(--pixel-green)]" />
+                          <span>Copied Body</span>
                         </>
                       ) : (
                         <>
-                          <Copy className="w-3 h-3" /> Copy Notice
+                          <Copy className="w-3 h-3" />
+                          <span>Copy Notice</span>
                         </>
                       )}
                     </button>
                     <button
                       onClick={handleDownloadMarkdown}
-                      className="btn-secondary text-xs py-1.5 px-3"
+                      className="btn btn-secondary text-xs py-1.5 px-3"
                       title="Download as Markdown"
                     >
-                      <Download className="w-3 h-3" /> .md
+                      <Download className="w-3 h-3" />
+                      <span>.md</span>
                     </button>
                   </div>
                 </div>
 
                 {/* Subject line box */}
-                <div className="bg-slate-900 p-2.5 rounded border border-slate-800 flex items-center justify-between gap-2 text-xs">
+                <div className="bg-[var(--bg-app)] p-3 rounded-lg border border-[var(--border-subtle)] flex items-center justify-between gap-2 text-xs">
                   <div className="truncate">
-                    <span className="text-slate-400 font-semibold mr-2">Subject:</span>
-                    <span className="text-slate-200 font-mono">{generatedTemplate.subject_line}</span>
+                    <span className="text-[var(--text-dim)] font-bold mr-2 uppercase tracking-wider">
+                      Subject:
+                    </span>
+                    <span className="font-mono text-[var(--text-main)]">
+                      {generatedTemplate.subject_line}
+                    </span>
                   </div>
                   <button
                     onClick={() => copyToClipboard(generatedTemplate.subject_line, "subject")}
-                    className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded bg-slate-800"
+                    className="text-[var(--text-dim)] hover:text-[var(--pixel-green)] text-xs px-2 py-1 rounded bg-[var(--bg-surface)]"
                     title="Copy subject line"
                   >
-                    {copiedSubject ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                    {copiedSubject ? (
+                      <Check className="w-3 h-3 text-[var(--pixel-green)]" />
+                    ) : (
+                      <Copy className="w-3 h-3" />
+                    )}
                   </button>
                 </div>
 
                 {/* Formatted body display */}
-                <div className="bg-slate-950 p-4 rounded-lg border border-slate-800 text-xs font-mono text-slate-200 whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
+                <div className="bg-[var(--bg-app)] p-4 rounded-lg border border-[var(--border-subtle)] font-mono text-xs text-[var(--text-main)] whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
                   {generatedTemplate.body_markdown}
                 </div>
               </div>
             ) : (
-              <div className="panel-card p-12 text-center space-y-3">
-                <FileText className="w-10 h-10 text-slate-600 mx-auto" />
-                <h4 className="text-sm font-semibold text-slate-300">No Notice Generated Yet</h4>
-                <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto">
+              <div className="card p-12 text-center space-y-3">
+                <FileText className="w-10 h-10 text-[var(--text-dim)] mx-auto" />
+                <h4 className="text-sm font-bold text-[var(--text-main)]">NO NOTICE GENERATED YET</h4>
+                <p className="text-xs text-[var(--text-muted)] max-w-sm mx-auto leading-relaxed">
                   Configure the recipient parameters on the left and click "Generate Privacy Rights Notice" to preview the formal legal notice.
                 </p>
               </div>
@@ -487,14 +511,14 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
       {activeTab === "searchengines" && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {/* Google Outdated Content Tool */}
-          <div className="panel-card p-5 space-y-3 flex flex-col justify-between">
+          <div className="card p-5 space-y-3 flex flex-col justify-between">
             <div className="space-y-2">
-              <span className="status-pill pill-cyan text-[10px]">Google Search</span>
-              <h3 className="font-bold text-sm text-slate-100">Outdated Content Removal</h3>
-              <p className="text-xs text-[var(--text-muted)]">
+              <span className="status-pill pill-pixel-cyan text-[9px]">Google Search</span>
+              <h3 className="text-sm font-bold text-[var(--text-main)]">Outdated Content Removal</h3>
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                 Use when a broker or site has already removed your phone number, but Google still displays your number in search snippet previews or cache.
               </p>
-              <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1.5 pt-2 bg-slate-900/60 p-3 rounded border border-slate-800">
+              <ol className="list-decimal list-inside text-xs text-[var(--text-muted)] space-y-1 pt-2 bg-[var(--bg-app)] p-3 rounded-lg border border-[var(--border-subtle)] leading-relaxed">
                 <li>Verify the live page no longer shows your phone number.</li>
                 <li>Copy the exact URL of the search result.</li>
                 <li>Submit the URL to Google Search Console Outdated Content Tool.</li>
@@ -505,21 +529,21 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
               href="https://search.google.com/search-console/remove-outdated-content"
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-primary text-xs py-2 px-3 w-full"
+              className="btn btn-primary text-xs py-2 px-3 w-full"
             >
               <ExternalLink className="w-3.5 h-3.5" /> Launch Google Outdated Tool
             </a>
           </div>
 
           {/* Google PII Removal (Personal Contact Removal) */}
-          <div className="panel-card p-5 space-y-3 flex flex-col justify-between">
+          <div className="card p-5 space-y-3 flex flex-col justify-between">
             <div className="space-y-2">
-              <span className="status-pill pill-emerald text-[10px]">Google Policy</span>
-              <h3 className="font-bold text-sm text-slate-100">Personal Info (PII) Removal</h3>
-              <p className="text-xs text-[var(--text-muted)]">
+              <span className="status-pill pill-pixel-green text-[9px]">Google Policy</span>
+              <h3 className="text-sm font-bold text-[var(--text-main)]">Personal Info (PII) Removal</h3>
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                 Direct removal of search results that expose personal contact info, doxxing content, or phone numbers that pose predatory or harassment risks.
               </p>
-              <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1.5 pt-2 bg-slate-900/60 p-3 rounded border border-slate-800">
+              <ol className="list-decimal list-inside text-xs text-[var(--text-muted)] space-y-1 pt-2 bg-[var(--bg-app)] p-3 rounded-lg border border-[var(--border-subtle)] leading-relaxed">
                 <li>Open Google's "Results about you" or PII removal request form.</li>
                 <li>Select "Personal info, like phone number or address".</li>
                 <li>Provide the offending search URL and your contact details.</li>
@@ -530,21 +554,21 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
               href="https://support.google.com/websearch/troubleshooter/3111061"
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-primary text-xs py-2 px-3 w-full"
+              className="btn btn-primary text-xs py-2 px-3 w-full"
             >
               <ExternalLink className="w-3.5 h-3.5" /> Launch Google PII Removal Form
             </a>
           </div>
 
           {/* Bing Content Removal */}
-          <div className="panel-card p-5 space-y-3 flex flex-col justify-between">
+          <div className="card p-5 space-y-3 flex flex-col justify-between">
             <div className="space-y-2">
-              <span className="status-pill pill-amber text-[10px]">Microsoft Bing</span>
-              <h3 className="font-bold text-sm text-slate-100">Bing Cache & Snippet Purge</h3>
-              <p className="text-xs text-[var(--text-muted)]">
+              <span className="status-pill pill-pixel-yellow text-[9px]">Microsoft Bing</span>
+              <h3 className="text-sm font-bold text-[var(--text-main)]">Bing Cache & Snippet Purge</h3>
+              <p className="text-xs text-[var(--text-muted)] leading-relaxed">
                 Purges outdated cache versions and search previews across Bing and Yahoo Search for pages where your number was removed.
               </p>
-              <ol className="list-decimal list-inside text-xs text-slate-300 space-y-1.5 pt-2 bg-slate-900/60 p-3 rounded border border-slate-800">
+              <ol className="list-decimal list-inside text-xs text-[var(--text-muted)] space-y-1 pt-2 bg-[var(--bg-app)] p-3 rounded-lg border border-[var(--border-subtle)] leading-relaxed">
                 <li>Sign in to Bing Webmaster Tools Content Removal.</li>
                 <li>Enter the exact URL of the outdated page.</li>
                 <li>Enter a keyword from the old cache (e.g. your phone number).</li>
@@ -555,7 +579,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
               href="https://www.bing.com/webmasters/help/bing-content-removal-tool-cb6c11ec"
               target="_blank"
               rel="noopener noreferrer"
-              className="btn-primary text-xs py-2 px-3 w-full"
+              className="btn btn-primary text-xs py-2 px-3 w-full"
             >
               <ExternalLink className="w-3.5 h-3.5" /> Launch Bing Removal Tool
             </a>
@@ -565,3 +589,5 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
     </div>
   );
 };
+
+export default RemediationHub;
