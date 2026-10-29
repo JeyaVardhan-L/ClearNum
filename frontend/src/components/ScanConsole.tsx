@@ -723,12 +723,24 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                   <div className="grid grid-cols-2 gap-2 text-[11px]">
                     <div>
                       <span className="text-[10px] text-[var(--text-dim)] block">Sender Header:</span>
-                      <span className="font-mono text-[var(--text-main)]">{singleSmsResult.sender}</span>
+                      <span className="font-mono text-[var(--text-main)] font-semibold">{singleSmsResult.sender}</span>
                     </div>
                     {singleSmsResult.dlt_prefix && (
                       <div>
-                        <span className="text-[10px] text-[var(--text-dim)] block">Telecom Circle / Gateway:</span>
+                        <span className="text-[10px] text-[var(--text-dim)] block">DLT Header Prefix:</span>
                         <span className="font-mono text-[var(--text-main)]">{singleSmsResult.dlt_prefix}</span>
+                      </div>
+                    )}
+                    {singleSmsResult.telecom_circle && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-dim)] block">Licensed Telecom Circle:</span>
+                        <span className="font-mono text-[var(--pixel-cyan)]">{singleSmsResult.telecom_circle}</span>
+                      </div>
+                    )}
+                    {singleSmsResult.access_provider && (
+                      <div>
+                        <span className="text-[10px] text-[var(--text-dim)] block">Telecom Access Provider:</span>
+                        <span className="font-mono text-[var(--pixel-cyan)]">{singleSmsResult.access_provider}</span>
                       </div>
                     )}
                   </div>
@@ -740,12 +752,31 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                     </span>
                   </div>
 
+                  {/* Official Direct Opt-Out or Portal Link */}
+                  {singleSmsResult.dnd_portal_url && (
+                    <div className="pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between">
+                      <div>
+                        <span className="text-[10px] text-[var(--text-dim)] block">Official Company DND / Opt-Out Portal</span>
+                        <span className="text-xs text-[var(--text-main)]">{singleSmsResult.brand_name} Preference Center</span>
+                      </div>
+                      <a
+                        href={singleSmsResult.dnd_portal_url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="btn btn-secondary text-[11px] py-1 px-3 flex items-center gap-1.5"
+                      >
+                        <ExternalLink className="w-3 h-3" />
+                        <span>Open DND Portal</span>
+                      </a>
+                    </div>
+                  )}
+
                   {/* 1-Click TRAI 1909 Complaint SMS */}
                   {singleSmsResult.complaint_sms && (
                     <div className="pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
                       <div className="flex items-center justify-between">
                         <span className="text-[10px] font-semibold text-[var(--pixel-yellow)] uppercase">
-                          TRAI 1909 Statutory Complaint Format (India)
+                          TRAI 1909 Statutory Complaint Format (TCCCPR 2018)
                         </span>
                         <button
                           type="button"
@@ -760,8 +791,58 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                         {singleSmsResult.complaint_sms}
                       </div>
                       <p className="text-[10px] text-[var(--text-dim)]">
-                        Send this exact SMS to <strong>1909</strong> from your registered telecom operator (Airtel, Jio, Vi, BSNL) to file an official DND complaint against this sender.
+                        Send this exact SMS to <strong>1909</strong> from your mobile SIM within <strong>3 days (72 hours)</strong> of receipt. Your telecom operator (Airtel, Jio, Vi, BSNL) will issue a formal complaint ticket.
                       </p>
+                    </div>
+                  )}
+
+                  {/* DoT Chakshu Portal Escalation (Suspect Fraud) */}
+                  {singleSmsResult.chakshu_portal_url && (
+                    <div className="pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-[var(--pixel-purple)] uppercase">
+                          DoT Chakshu (Sanchar Saathi) Suspect Fraud Escalation
+                        </span>
+                        <a
+                          href={singleSmsResult.chakshu_portal_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1"
+                        >
+                          <ExternalLink className="w-3 h-3 text-[var(--pixel-purple)]" />
+                          <span>Report on Chakshu</span>
+                        </a>
+                      </div>
+                      <p className="text-[10px] text-[var(--text-dim)]">
+                        If this message offers fake loans, lottery prizes, electricity bill threats, or suspicious links, report it on DoT's official Chakshu facility to trigger pan-India telecom blacklisting.
+                      </p>
+                    </div>
+                  )}
+
+                  {/* DPDP Act 2023 Statutory Consent Revocation Notice */}
+                  {singleSmsResult.dpdp_notice && (
+                    <div className="pt-2 border-t border-[var(--border-subtle)] space-y-1.5">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] font-semibold text-[var(--pixel-green)] uppercase">
+                          DPDP Act 2023 Statutory Consent Revocation &amp; Erasure Demand
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => copyToClipboard(singleSmsResult.dpdp_notice!, "dpdp")}
+                          className="btn btn-secondary text-[10px] py-1 px-2 flex items-center gap-1"
+                        >
+                          {copiedText === "dpdp" ? <Check className="w-3 h-3 text-[var(--pixel-green)]" /> : <Copy className="w-3 h-3" />}
+                          <span>{copiedText === "dpdp" ? "Copied!" : "Copy Legal Notice"}</span>
+                        </button>
+                      </div>
+                      <pre className="p-2 rounded bg-[var(--bg-app)] font-mono text-[10px] text-[var(--text-muted)] whitespace-pre-wrap max-h-28 overflow-y-auto border border-[var(--border-subtle)]">
+                        {singleSmsResult.dpdp_notice}
+                      </pre>
+                      {singleSmsResult.grievance_email && (
+                        <p className="text-[10px] text-[var(--text-dim)]">
+                          Email this statutory demand directly to: <strong>{singleSmsResult.grievance_email}</strong>
+                        </p>
+                      )}
                     </div>
                   )}
 

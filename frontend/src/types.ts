@@ -1,5 +1,5 @@
 /**
- * NumberShield TypeScript Data Definitions
+ * ClearNum TypeScript Data Definitions (India-First Architecture)
  */
 
 export interface PhoneParseResult {
@@ -42,6 +42,7 @@ export interface DiscoveredExposure {
   last_checked_at: string;
   remediation_status: string;
   official_removal_url?: string;
+  match_rationale?: string;
 }
 
 export interface RemediationSource {
@@ -58,6 +59,42 @@ export interface RemediationSource {
   statutory_rights: string[];
   contact_email?: string;
   notes?: string;
+  execution_type?: string;
+  verification_status?: string;
+  lookup_method?: string;
+  can_match_phone?: boolean;
+  evidence_attribution?: string;
+  last_verified_at?: string;
+}
+
+export interface IndianSourceTarget {
+  source_id: string;
+  name: string;
+  official_url: string;
+  category: string;
+  category_label: string;
+  execution_type: string;
+  verification_status: string;
+  access_restrictions: string;
+  lookup_method: string;
+  can_match_phone: boolean;
+  evidence_attribution: string;
+  last_verified_at: string;
+  implementation_status: string;
+  known_limitations: string;
+  instructions: string[];
+  statutory_rights: string[];
+  grievance_email?: string;
+  customer_care_phone?: string;
+  domains: string[];
+}
+
+export interface InventorySummary {
+  total_sources: number;
+  by_category: Record<string, number>;
+  by_execution_type: Record<string, number>;
+  by_verification_status: Record<string, number>;
+  last_verified: string;
 }
 
 export interface ManualDorkItem {
@@ -131,7 +168,6 @@ export interface GeneratedTemplate {
   body_markdown: string;
 }
 
-
 export interface DiscoveredSMSSender {
   sender_number: string;
   is_shortcode: boolean;
@@ -150,10 +186,18 @@ export interface AnalyzeSmsResult {
   category: string;
   brand_name: string;
   dlt_prefix: string;
+  telecom_circle?: string;
+  access_provider?: string;
   is_shortcode: boolean;
   has_opt_out_keyword: boolean;
   opt_out_command: string;
   recommended_action: string;
   complaint_sms?: string;
+  chakshu_portal_url?: string;
+  chakshu_instructions?: string[];
   merchant_notice?: string;
+  dpdp_notice?: string;
+  dnd_portal_url?: string;
+  grievance_email?: string;
+  customer_care_phone?: string;
 }

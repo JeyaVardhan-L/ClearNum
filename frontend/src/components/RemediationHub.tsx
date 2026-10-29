@@ -143,7 +143,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
             }`}
           >
-            Broker Directory ({sources.length})
+            Indian Directory & Broker Index ({sources.length})
           </button>
           <button
             onClick={() => setActiveTab("templates")}
@@ -346,7 +346,8 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     <option value="CCPA_DELETE">CCPA / CPRA Deletion & Do-Not-Sell (California / US)</option>
                     <option value="GDPR_ERASURE">GDPR Article 17 Erasure & Art. 21 Objection (EU / UK)</option>
                     <option value="TCPA_COMPLAINT">TCPA Revocation & Internal DNC Demand (US FCC/FTC)</option>
-                    <option value="TRAI_1909">TRAI 1909 Commercial Comm. Violation (India)</option>
+                    <option value="DPDP_ACT_2023">DPDP Act 2023 Consent Revocation & Erasure (India)</option>
+                    <option value="TRAI_1909">TRAI 1909 Commercial Comm. Violation (India TCCCPR)</option>
                     <option value="MERCHANT_UNSUBSCRIBE">Merchant Marketing Opt-Out Notice</option>
                   </select>
                 </div>
