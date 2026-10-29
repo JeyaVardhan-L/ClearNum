@@ -31,11 +31,23 @@ env/
 .env.local
 .env.*.local
 .numbershield_key
+*.sqlite
+*.sqlite-*
 *.sqlite3
 *.db
 *.db-*
 data/
 temp_imports/
+
+# Scratch scripts, tool outputs, and local agent skill artifacts
+UsersuserDownloadsppt-master/
+detect*.py
+read_detect*.py
+graphify-out/
+.claude/
+.codex/
+.agents/skills/diagram-design/
+.agents/skills/ppt-master/
 
 # Testing & Coverage
 .pytest_cache/
