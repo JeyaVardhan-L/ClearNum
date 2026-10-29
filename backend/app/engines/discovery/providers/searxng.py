@@ -27,6 +27,7 @@ logger = logging.getLogger(__name__)
 FALLBACK_INSTANCES = [
     "https://priv.au",
     "https://searx.tiekoetter.com",
+    "https://searxng.site",
 ]
 
 
@@ -73,7 +74,7 @@ class SearXNGProvider(SearchProvider):
         last_diagnostic = "All attempted SearXNG endpoints failed or were unreachable"
 
         # Try configured instance or first accessible fallback (bounded, polite, no evasive hammering)
-        for base_url in instances[:2]:
+        for base_url in instances[:3]:
             clean_base = base_url.rstrip("/")
             endpoint = f"{clean_base}/search"
             is_configured_local = bool(self.instance_url and clean_base == self.instance_url.rstrip("/"))
@@ -96,9 +97,11 @@ class SearXNGProvider(SearchProvider):
 
                     if resp.status_code == 429:
                         last_status = ProviderStatus.RATE_LIMITED
-                        last_diagnostic = f"SearXNG instance ({urlparse(clean_base).netloc}) returned HTTP 429 (Rate Limited). Respecting host backoff."
-                        # Stop here; do not hammer alternate public instances to evade rate limits
-                        break
+                        last_diagnostic = (
+                            f"SearXNG instance ({urlparse(clean_base).netloc}) returned HTTP 429 (Rate Limited). "
+                            "Public instances enforce strict anti-scraping limits. Use Direct Search Dorks or run a local SearXNG container."
+                        )
+                        continue
 
                     if resp.status_code == 200:
                         try:

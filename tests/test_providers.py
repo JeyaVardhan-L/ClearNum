@@ -426,3 +426,51 @@ async def test_wayback_unsupported_on_invalid_phone(invalid_phone):
     assert len(res) == 0
     assert res.outcome.status == ProviderStatus.UNSUPPORTED
     assert res.outcome.retryable is False
+
+
+@pytest.mark.asyncio
+async def test_ddg_rate_limited_http_202_challenge(valid_phone):
+    mock_resp = MagicMock()
+    mock_resp.status_code = 202
+    mock_resp.text = "Challenge required"
+
+    with patch("httpx.AsyncClient.post", new_callable=AsyncMock, return_value=mock_resp):
+        provider = DuckDuckGoProvider()
+        res = await provider.search(valid_phone)
+        assert len(res) == 0
+        assert res.outcome is not None
+        assert res.outcome.status == ProviderStatus.RATE_LIMITED
+        assert res.outcome.retryable is True
+        assert "202" in res.outcome.diagnostic
+
+
+@pytest.mark.asyncio
+async def test_searxng_fallback_on_429_tries_second_instance(valid_phone):
+    # First instance returns 429, second instance returns 200 with result
+    resp_429 = MagicMock()
+    resp_429.status_code = 429
+    resp_429.text = "Rate Limited"
+
+    resp_200 = MagicMock()
+    resp_200.status_code = 200
+    resp_200.json.return_value = {
+        "results": [
+            {
+                "url": "https://example.com/listing",
+                "title": "Example Directory",
+                "content": "+14155552671",
+            }
+        ]
+    }
+
+    mock_client = AsyncMock()
+    mock_client.get.side_effect = [resp_429, resp_200]
+
+    with patch("backend.app.engines.discovery.providers.searxng.validate_url_safe"):
+        with patch("httpx.AsyncClient", return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_client), __aexit__=AsyncMock())):
+            provider = SearXNGProvider()
+            res = await provider.search(valid_phone)
+            # Should have fallen back and succeeded on second instance
+            assert len(res) == 1
+            assert res.outcome.status == ProviderStatus.HEALTHY
+            assert res[0].url == "https://example.com/listing"

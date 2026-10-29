@@ -89,6 +89,17 @@ class DuckDuckGoProvider(SearchProvider):
                     )
                     return SearchExecutionResult(results=[], outcome=outcome)
 
+                if resp.status_code == 202:
+                    outcome = ProviderOutcome(
+                        provider_id=self.provider_id,
+                        status=ProviderStatus.RATE_LIMITED,
+                        result_count=0,
+                        duration_ms=duration_ms,
+                        retryable=True,
+                        diagnostic="DuckDuckGo presented anti-bot challenge (HTTP 202). Use Direct Search Dorks for browser search.",
+                    )
+                    return SearchExecutionResult(results=[], outcome=outcome)
+
                 if resp.status_code != 200:
                     outcome = ProviderOutcome(
                         provider_id=self.provider_id,
@@ -111,7 +122,7 @@ class DuckDuckGoProvider(SearchProvider):
                         result_count=0,
                         duration_ms=duration_ms,
                         retryable=True,
-                        diagnostic="DuckDuckGo presented automated request verification challenge.",
+                        diagnostic="DuckDuckGo presented automated request verification challenge. Use Direct Search Dorks.",
                     )
                     return SearchExecutionResult(results=[], outcome=outcome)
 
@@ -119,6 +130,10 @@ class DuckDuckGoProvider(SearchProvider):
                 elements = soup.find_all("div", class_="result")
 
                 for el in elements[:max_results]:
+                    # Exclude the "no-results" placeholder div
+                    if "result--no-result" in el.get("class", []):
+                        continue
+
                     title_el = el.find("a", class_="result__a")
                     snippet_el = el.find("a", class_="result__snippet") or el.find("div", class_="result__snippet")
                     url_el = el.find("a", class_="result__url")

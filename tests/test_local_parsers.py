@@ -63,3 +63,45 @@ def test_sms_backup_xml_parser(tmp_path: Path):
     assert shortcode_sender.has_opt_out_keyword is True
     assert shortcode_sender.opt_out_command == "STOP"
     assert shortcode_sender.category == "MARKETING_SMS"
+
+
+def test_sms_dlt_headers_and_single_analyzer(tmp_path: Path):
+    from backend.app.engines.discovery.local_parsers.sms_parser import analyze_single_sms
+
+    # 1. Test XML with DLT headers
+    xml_file = tmp_path / "dlt_sms_backup.xml"
+    xml_content = """<?xml version='1.0' encoding='UTF-8' standalone='yes' ?>
+    <smses count="4">
+        <sms address="VM-HDFCBK" body="Avail pre-approved personal loan at 9.9%. Reply STOP to opt out." date="1700000000000" type="1" />
+        <sms address="AD-SWIGGY" body="50% off on your favourite meals on Swiggy today!" date="1700001000000" type="1" />
+        <sms address="VK-AMAZON" body="Great Indian Festival deals live now on Amazon." date="1700002000000" type="1" />
+        <sms address="CP-AIRTEL" body="Recharge your Airtel prepaid number for unlimited data." date="1700003000000" type="1" />
+    </smses>
+    """
+    xml_file.write_text(xml_content, encoding="utf-8")
+
+    senders = parse_sms_backup_file(xml_file)
+    assert len(senders) == 4
+
+    hdfc = next((s for s in senders if s.sender_number == "VM-HDFCBK"), None)
+    assert hdfc is not None
+    assert hdfc.brand_name == "HDFCBK"
+    assert hdfc.dlt_prefix == "VM"
+    assert hdfc.category == "COMMERCIAL_BANKING"
+    assert hdfc.has_opt_out_keyword is True
+
+    swiggy = next((s for s in senders if s.sender_number == "AD-SWIGGY"), None)
+    assert swiggy is not None
+    assert swiggy.brand_name == "SWIGGY"
+    assert swiggy.category == "COMMERCIAL_SHOPPING"
+
+    airtel = next((s for s in senders if s.sender_number == "CP-AIRTEL"), None)
+    assert airtel is not None
+    assert airtel.brand_name == "AIRTEL"
+    assert airtel.category == "COMMERCIAL_TELECOM"
+
+    # 2. Test single message analyzer
+    single = analyze_single_sms("AD-SWIGGY", "50% off on your food order with Swiggy", "IN")
+    assert single.brand_name == "SWIGGY"
+    assert single.category == "COMMERCIAL_SHOPPING"
+    assert "TRAI 1909" in single.recommended_action
