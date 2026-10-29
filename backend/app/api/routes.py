@@ -25,6 +25,7 @@ from backend.app.engines.discovery.providers import (
 from backend.app.engines.discovery.local_parsers import (
     parse_mbox_file,
     parse_sms_backup_file,
+    analyze_single_sms,
 )
 from backend.app.engines.remediation import (
     lookup_source_by_url,
@@ -63,6 +64,8 @@ from backend.app.api.schemas import (
     RescanVerificationResponse,
     SpamIncidentRequest,
     PurgeResponse,
+    AnalyzeSMSRequest,
+    AnalyzeSMSResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -88,6 +91,41 @@ def parse_phone_endpoint(req: PhoneParseRequest):
         hmac_id=norm.hmac_id,
         search_queries=norm.search_queries,
     )
+
+@router.post("/discovery/analyze-sms", response_model=AnalyzeSMSResponse)
+def analyze_sms_endpoint(req: AnalyzeSMSRequest):
+    sender_info = analyze_single_sms(req.sender, req.message_body, req.region)
+    complaint_sms = None
+    merchant_notice = None
+
+    if req.region.upper() == "IN":
+        # Generate TRAI 1909 complaint format
+        user_digits = "".join(c for c in (req.user_phone or "") if c.isdigit())
+        user_digits = user_digits if user_digits else "XXXXXXXXXX"
+        complaint_sms = f"COMP TEL NO {user_digits}, 29/10/26, 10:30, {sender_info.sender_number}"
+
+    if sender_info.brand_name:
+        merchant_notice = (
+            f"FORMAL NOTICE OF WITHDRAWAL OF CONSENT / STATUTORY DO-NOT-CALL DEMAND\n"
+            f"To: {sender_info.brand_name} Privacy & Compliance Team\n\n"
+            f"Please immediately remove my telephone number from all marketing, promotional, "
+            f"and affiliated third-party databases. This serves as formal revocation of consent "
+            f"under TRAI Telecom Commercial Communications Customer Preference Regulations / statutory privacy laws."
+        )
+
+    return AnalyzeSMSResponse(
+        sender=sender_info.sender_number,
+        category=sender_info.category,
+        brand_name=sender_info.brand_name,
+        dlt_prefix=sender_info.dlt_prefix,
+        is_shortcode=sender_info.is_shortcode,
+        has_opt_out_keyword=sender_info.has_opt_out_keyword,
+        opt_out_command=sender_info.opt_out_command,
+        recommended_action=sender_info.recommended_action,
+        complaint_sms=complaint_sms,
+        merchant_notice=merchant_notice,
+    )
+
 
 
 # --- 2. Discovery Engine ---
@@ -569,6 +607,9 @@ async def import_sms_endpoint(
                     "opt_out_command": s.opt_out_command,
                     "sample_body": s.sample_body,
                     "category": s.category,
+                    "brand_name": s.brand_name,
+                    "dlt_prefix": s.dlt_prefix,
+                    "recommended_action": s.recommended_action,
                 }
                 for s in senders
             ],

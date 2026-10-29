@@ -163,3 +163,44 @@ def test_export_audit_endpoint():
     assert "exposures" in report
     assert len(report["exposures"]) == 5
 
+
+
+def test_analyze_sms_endpoint_dlt_and_commercial():
+    # 1. Test Indian Bank DLT promotional SMS
+    resp = client.post("/api/discovery/analyze-sms", json={
+        "sender": "VM-HDFCBK",
+        "message_body": "Pre-approved personal loan of Rs 5 Lakhs available now. Special low interest rate.",
+        "region": "IN",
+        "user_phone": "+918106833178",
+    })
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["sender"] == "VM-HDFCBK"
+    assert data["brand_name"] == "HDFCBK"
+    assert data["dlt_prefix"] == "VM"
+    assert data["category"] == "COMMERCIAL_BANKING"
+    assert "COMP TEL NO 918106833178" in data["complaint_sms"]
+    assert "HDFCBK" in data["merchant_notice"]
+
+    # 2. Test Shopping App SMS
+    resp_shop = client.post("/api/discovery/analyze-sms", json={
+        "sender": "AD-SWIGGY",
+        "message_body": "50% off on your favourite meals on Swiggy today!",
+        "region": "IN",
+    })
+    assert resp_shop.status_code == 200
+    data_shop = resp_shop.json()
+    assert data_shop["brand_name"] == "SWIGGY"
+    assert data_shop["category"] == "COMMERCIAL_SHOPPING"
+
+    # 3. Test Numeric Shortcode with STOP
+    resp_short = client.post("/api/discovery/analyze-sms", json={
+        "sender": "223344",
+        "message_body": "Flash sale ending tonight! Reply STOP to opt out.",
+        "region": "US",
+    })
+    assert resp_short.status_code == 200
+    data_short = resp_short.json()
+    assert data_short["is_shortcode"] is True
+    assert data_short["has_opt_out_keyword"] is True
+    assert data_short["opt_out_command"] == "STOP"

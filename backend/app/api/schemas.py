@@ -130,3 +130,23 @@ class PurgeResponse(BaseModel):
     success: bool
     message: str
     purged_at: str
+
+
+class AnalyzeSMSRequest(BaseModel):
+    sender: str = Field(..., description="Sender header or telephone number (e.g. VM-HDFCBK, AD-SWIGGY)")
+    message_body: str = Field(default="", description="Optional SMS message body text")
+    region: str = Field(default="IN", description="Jurisdiction code (e.g. IN, US, GB)")
+    user_phone: Optional[str] = Field(default="", description="Optional user phone number for complaint generation")
+
+
+class AnalyzeSMSResponse(BaseModel):
+    sender: str
+    category: str
+    brand_name: str
+    dlt_prefix: str
+    is_shortcode: bool
+    has_opt_out_keyword: bool
+    opt_out_command: str
+    recommended_action: str
+    complaint_sms: Optional[str] = None
+    merchant_notice: Optional[str] = None
