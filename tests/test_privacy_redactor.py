@@ -31,8 +31,8 @@ def test_log_redaction_filter():
 
 
 def test_cryptographic_purge():
-    # Ensure clean slate before test
-    purge_all_data()
+    # Ensure clean slate before test with explicit confirmation
+    purge_all_data(confirmed=True, confirmation_code="PURGE")
 
     # Insert dummy identity
     conn = get_db_connection()
@@ -49,8 +49,9 @@ def test_cryptographic_purge():
     assert conn.execute("SELECT COUNT(*) FROM identities").fetchone()[0] == 1
     conn.close()
 
-    # Execute purge
-    purge_all_data()
+    # Execute purge with explicit confirmation
+    res = purge_all_data(confirmed=True, confirmation_code="PURGE")
+    assert res["success"] is True
 
     # Verify zero records
     conn = get_db_connection()

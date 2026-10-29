@@ -19,7 +19,9 @@ import {
   uploadSmsFile,
   exportAuditReport,
   purgeData,
+  getPurgeStatus,
 } from "../api";
+import type { PurgeStatusResponse } from "../types";
 
 interface VerificationAuditProps {
   currentIdentity: PhoneParseResult | null;
@@ -67,6 +69,22 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
   const [showPurgeConfirm, setShowPurgeConfirm] = useState(false);
   const [purgeInput, setPurgeInput] = useState("");
   const [purgeLoading, setPurgeLoading] = useState(false);
+  const [purgeStatus, setPurgeStatus] = useState<PurgeStatusResponse | null>(null);
+  const [purgeStatusLoading, setPurgeStatusLoading] = useState(false);
+
+  const openPurgeModal = async () => {
+    setShowPurgeConfirm(true);
+    setPurgeInput("");
+    setPurgeStatusLoading(true);
+    try {
+      const status = await getPurgeStatus();
+      setPurgeStatus(status);
+    } catch (err) {
+      console.error("Failed to fetch purge status", err);
+    } finally {
+      setPurgeStatusLoading(false);
+    }
+  };
 
   const handleLiveRescan = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -151,8 +169,10 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
 
     setPurgeLoading(true);
     try {
-      await purgeData();
+      await purgeData(purgeInput);
       setShowPurgeConfirm(false);
+      setPurgeInput("");
+      setPurgeStatus(null);
       onPurgeComplete();
     } catch (err: any) {
       alert(`Purge failed: ${err.message}`);
@@ -188,7 +208,7 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
             <span>EXPORT AUDIT TRAIL</span>
           </button>
           <button
-            onClick={() => setShowPurgeConfirm(true)}
+            onClick={openPurgeModal}
             className="btn btn-pixel danger text-xs py-1.5 px-3"
             title="Zero-trace cryptographic wipe of all records"
           >
@@ -467,7 +487,7 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
               Permanently destroys all discovered exposures, remediation records, spam logs, and the 256-bit HMAC key. Irreversible once confirmed.
             </p>
             <button
-              onClick={() => setShowPurgeConfirm(true)}
+              onClick={openPurgeModal}
               className="btn btn-pixel danger w-full py-2.5 mt-1 text-xs font-semibold"
             >
               <Trash2 className="w-3.5 h-3.5" /> Launch Cryptographic Purge
@@ -492,10 +512,38 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
               </div>
             </div>
 
+            {purgeStatusLoading ? (
+              <div className="text-xs text-[var(--text-muted)] animate-pulse">
+                Inspecting target database and calculating records to be deleted...
+              </div>
+            ) : purgeStatus ? (
+              <div className="space-y-2 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] p-3 text-xs">
+                <div className="flex justify-between items-center text-[var(--text-muted)]">
+                  <span>Target Database:</span>
+                  <span className="font-mono text-[10px] text-[var(--text-main)] max-w-[220px] truncate" title={purgeStatus.database_path}>
+                    {purgeStatus.database_path}
+                  </span>
+                </div>
+                <div className="flex justify-between items-center text-[var(--text-muted)]">
+                  <span>Total Stored Records:</span>
+                  <span className="font-mono font-bold text-rose-400">{purgeStatus.total_records}</span>
+                </div>
+                {purgeStatus.is_default_database && (
+                  <div className="text-[11px] text-amber-400 font-semibold">
+                    Warning: This will delete your primary local ClearNum database.
+                  </div>
+                )}
+              </div>
+            ) : null}
+
             <p className="text-xs text-[var(--text-muted)] leading-relaxed">
-              This will overwrite the SQLite database and HMAC seed with random entropy, drop all tables, and reset your session.
+              This will drop all SQLite tables, unlink the secret HMAC seed, and reset your session.
               To confirm, type <span className="font-mono font-bold text-rose-400">PURGE</span> below:
             </p>
+
+            <div className="p-2.5 rounded bg-zinc-900 border border-zinc-800 text-[11px] text-zinc-400 leading-normal">
+              <strong className="text-zinc-300">Storage Notice:</strong> While files are unlinked and tables dropped, SSD wear-leveling and filesystem journaling cannot guarantee forensic-grade bit-level unrecoverability.
+            </div>
 
             <input
               type="text"

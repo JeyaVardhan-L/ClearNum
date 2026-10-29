@@ -7,17 +7,19 @@ import hmac
 import hashlib
 import secrets
 from pathlib import Path
+from typing import Optional
 from backend.app.core.config import settings
 
 
-def get_or_create_secret_key(key_path: Path = settings.key_path) -> bytes:
+def get_or_create_secret_key(key_path: Optional[Path] = None) -> bytes:
     """Retrieves or securely generates a 256-bit local HMAC key.
     Ensures that phone numbers cannot be enumerated via pre-computed rainbow tables.
     """
-    key_path.parent.mkdir(parents=True, exist_ok=True)
-    if key_path.exists():
+    target_key = (key_path or settings.key_path).resolve()
+    target_key.parent.mkdir(parents=True, exist_ok=True)
+    if target_key.exists():
         try:
-            key = key_path.read_bytes().strip()
+            key = target_key.read_bytes().strip()
             if len(key) >= 32:
                 return key
         except Exception:
@@ -25,10 +27,10 @@ def get_or_create_secret_key(key_path: Path = settings.key_path) -> bytes:
     
     # Generate fresh 32 bytes (256 bits) of cryptographic entropy
     new_key = secrets.token_bytes(32)
-    key_path.write_bytes(new_key)
+    target_key.write_bytes(new_key)
     try:
         # On POSIX systems, restrict permissions to owner only
-        key_path.chmod(0o600)
+        target_key.chmod(0o600)
     except Exception:
         pass
     return new_key

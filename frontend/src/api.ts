@@ -19,6 +19,8 @@ import type {
   SearchRemovalGuide,
   GeneratedTemplate,
   AnalyzeSmsResult,
+  PurgeStatusResponse,
+  PurgeResponse,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -245,9 +247,20 @@ export async function getMetrics(identityHmac: string): Promise<ExposureMetrics>
 }
 export const getExposureMetrics = getMetrics;
 
-export async function purgeData(): Promise<{ success: boolean; message: string; purged_at: string }> {
+export async function getPurgeStatus(): Promise<PurgeStatusResponse> {
+  const res = await fetch(`${API_BASE}/privacy/purge/status`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function purgeData(confirmationCode: string = "PURGE"): Promise<PurgeResponse> {
   const res = await fetch(`${API_BASE}/privacy/purge`, {
     method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      confirm: true,
+      confirmation_code: confirmationCode,
+    }),
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

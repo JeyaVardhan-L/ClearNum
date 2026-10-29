@@ -200,4 +200,34 @@ export interface AnalyzeSmsResult {
   dnd_portal_url?: string;
   grievance_email?: string;
   customer_care_phone?: string;
+  confidence_disclaimer?: string;
+  statutory_deadline_info?: string;
+  dpdp_status_note?: string;
+}
+
+export interface PurgeStatusResponse {
+  database_path: string;
+  database_exists: boolean;
+  database_size_bytes: number;
+  key_path: string;
+  key_exists: boolean;
+  is_default_database: boolean;
+  record_counts: Record<string, number>;
+  total_records: number;
+  allowed_to_purge: boolean;
+  validation_reason: string;
+  warning: string;
+}
+
+export interface PurgeResponse {
+  success: boolean;
+  message: string;
+  database_path: string;
+  key_path: string;
+  tables_dropped: string[];
+  records_deleted: Record<string, number>;
+  key_deleted: boolean;
+  files_unlinked: string[];
+  errors: string[];
+  purged_at: string;
 }

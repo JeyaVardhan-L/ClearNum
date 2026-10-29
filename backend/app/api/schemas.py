@@ -127,9 +127,35 @@ class SpamIncidentRequest(BaseModel):
     campaign_summary: str = ""
 
 
+class PurgeRequest(BaseModel):
+    confirm: bool = Field(default=False, description="Must be explicitly set to True to execute purge")
+    confirmation_code: str = Field(default="", description="Must be exactly 'PURGE' to confirm deletion")
+
+
+class PurgeStatusResponse(BaseModel):
+    database_path: str
+    database_exists: bool
+    database_size_bytes: int
+    key_path: str
+    key_exists: bool
+    is_default_database: bool
+    record_counts: Dict[str, int]
+    total_records: int
+    allowed_to_purge: bool
+    reason: str = ""
+    warning: str
+
+
 class PurgeResponse(BaseModel):
     success: bool
     message: str
+    database_path: str = ""
+    key_path: str = ""
+    tables_dropped: List[str] = []
+    records_deleted: Dict[str, int] = {}
+    key_deleted: bool = False
+    files_unlinked: List[str] = []
+    errors: List[str] = []
     purged_at: str
 
 
@@ -159,6 +185,9 @@ class AnalyzeSMSResponse(BaseModel):
     dnd_portal_url: Optional[str] = None
     grievance_email: Optional[str] = None
     customer_care_phone: Optional[str] = None
+    confidence_disclaimer: Optional[str] = None
+    statutory_deadline_info: Optional[str] = None
+    dpdp_status_note: Optional[str] = None
 
 
 class IndianSourceTargetItem(BaseModel):

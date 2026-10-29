@@ -745,6 +745,12 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                     )}
                   </div>
 
+                  {singleSmsResult.confidence_disclaimer && (
+                    <div className="p-2 rounded bg-amber-950/20 border border-amber-800/30 text-[10px] text-amber-300/90 leading-tight">
+                      <strong className="text-amber-200">DLT Route Inference:</strong> {singleSmsResult.confidence_disclaimer}
+                    </div>
+                  )}
+
                   <div>
                     <span className="text-[10px] text-[var(--text-dim)] block mb-1">Recommended Action:</span>
                     <span className="text-[var(--pixel-green)] font-semibold">
@@ -793,6 +799,11 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                       <p className="text-[10px] text-[var(--text-dim)]">
                         Send this exact SMS to <strong>1909</strong> from your mobile SIM within <strong>3 days (72 hours)</strong> of receipt. Your telecom operator (Airtel, Jio, Vi, BSNL) will issue a formal complaint ticket.
                       </p>
+                      {singleSmsResult.statutory_deadline_info && (
+                        <p className="text-[10px] text-amber-300/90 leading-normal">
+                          <strong>TRAI Statutory Rule:</strong> {singleSmsResult.statutory_deadline_info}
+                        </p>
+                      )}
                     </div>
                   )}
 
@@ -841,6 +852,11 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                       {singleSmsResult.grievance_email && (
                         <p className="text-[10px] text-[var(--text-dim)]">
                           Email this statutory demand directly to: <strong>{singleSmsResult.grievance_email}</strong>
+                        </p>
+                      )}
+                      {singleSmsResult.dpdp_status_note && (
+                        <p className="text-[10px] text-zinc-400 leading-normal">
+                          <strong>Regulatory Status:</strong> {singleSmsResult.dpdp_status_note}
                         </p>
                       )}
                     </div>

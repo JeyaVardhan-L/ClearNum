@@ -18,4 +18,4 @@ def test_environment(tmp_path: Path, monkeypatch):
     
     init_db(db_file)
     yield
-    purge_all_data(db_file, key_file)
+    purge_all_data(db_file, key_file, confirmed=True, confirmation_code="PURGE")

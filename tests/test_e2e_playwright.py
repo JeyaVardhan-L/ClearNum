@@ -5,6 +5,8 @@ import time
 import pytest
 import uvicorn
 from playwright.sync_api import sync_playwright
+from backend.app.core.config import settings
+from backend.app.core.database import init_db
 from backend.app.main import app
 
 
@@ -26,12 +28,26 @@ class LiveServer(threading.Thread):
 
 
 @pytest.fixture(scope="module")
-def base_url():
+def base_url(tmp_path_factory):
+    temp_dir = tmp_path_factory.mktemp("playwright_isolated")
+    test_db = temp_dir / "test_playwright.db"
+    test_key = temp_dir / ".test_playwright_key"
+
+    orig_db = settings.db_path
+    orig_key = settings.key_path
+
+    settings.db_path = test_db
+    settings.key_path = test_key
+    init_db(test_db)
+
     server = LiveServer(port=8766)
     server.start()
     time.sleep(2.0)
     yield "http://127.0.0.1:8766"
     server.stop()
+
+    settings.db_path = orig_db
+    settings.key_path = orig_key
 
 
 def test_full_user_workflow_desktop(base_url):

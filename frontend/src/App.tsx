@@ -78,14 +78,18 @@ export function App() {
   };
 
   const handlePurge = async () => {
-    if (!window.confirm("Perform zero-trace cryptographic purge? All database records and HMAC key will be destroyed.")) {
+    const input = window.prompt("Type PURGE to permanently destroy all local data records and HMAC key:");
+    if (input !== "PURGE") {
+      if (input !== null) {
+        showToast("Purge cancelled: confirmation code 'PURGE' was not entered.", "info");
+      }
       return;
     }
     try {
-      await purgeData();
+      const res = await purgeData("PURGE");
       setCurrentIdentity(null);
       setExposures([]);
-      showToast("All local records and HMAC keys have been cryptographically erased.", "info");
+      showToast(res.message || "All local records and HMAC keys have been erased.", "info");
       setActiveTab("scan");
     } catch (err: any) {
       showToast(`Purge failed: ${err.message}`, "error");

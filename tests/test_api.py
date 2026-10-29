@@ -99,7 +99,21 @@ def test_synthetic_scenario_and_metrics_flow():
 
 
 def test_purge_endpoint():
-    resp = client.post("/api/privacy/purge")
+    # Purge without confirmation must be rejected
+    resp_no_confirm = client.post("/api/privacy/purge", json={"confirm": False, "confirmation_code": ""})
+    assert resp_no_confirm.status_code == 400
+
+    # Purge with wrong confirmation code must be rejected
+    resp_wrong_code = client.post("/api/privacy/purge", json={"confirm": True, "confirmation_code": "CANCEL"})
+    assert resp_wrong_code.status_code == 400
+
+    # Purge status inspection
+    status_resp = client.get("/api/privacy/purge/status")
+    assert status_resp.status_code == 200
+    assert "allowed_to_purge" in status_resp.json()
+
+    # Confirmed purge must succeed on test database
+    resp = client.post("/api/privacy/purge", json={"confirm": True, "confirmation_code": "PURGE"})
     assert resp.status_code == 200
     assert resp.json()["success"] is True
 

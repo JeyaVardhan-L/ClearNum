@@ -8,7 +8,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from urllib.parse import urlparse
 
 from backend.app.core.config import settings
-from backend.app.core.database import get_db_connection, init_db, purge_all_data, utc_now_iso
+from backend.app.core.database import get_db_connection, init_db, purge_all_data, utc_now_iso, get_purge_impact
 from backend.app.core.security import compute_phone_hmac, mask_phone_number
 from backend.app.core.ssrf import safe_fetch_url
 from backend.app.engines.discovery import parse_and_normalize, match_phone_in_text
@@ -73,6 +73,8 @@ from backend.app.api.schemas import (
     RescanVerificationRequest,
     RescanVerificationResponse,
     SpamIncidentRequest,
+    PurgeRequest,
+    PurgeStatusResponse,
     PurgeResponse,
     AnalyzeSMSRequest,
     AnalyzeSMSResponse,
@@ -182,6 +184,9 @@ def analyze_sms_endpoint(req: AnalyzeSMSRequest):
         dnd_portal_url=dnd_portal_url,
         grievance_email=grievance_email,
         customer_care_phone=customer_care_phone,
+        confidence_disclaimer="Probabilistic route inference based on TRAI DLT header allocations. DLT headers indicate the licensed telecom route, but do not provide cryptographic authentication or guarantee message authenticity. Attackers can forge headers or register shell businesses.",
+        statutory_deadline_info="TRAI TCCCPR 2018 Regulation 25 mandates filing UCC complaints within 72 hours (3 days) of receipt. Access providers are statutorily required to complete investigations within 7 working days, but enforcement depends on carrier verification.",
+        dpdp_status_note="Under Section 6(4) and Section 12 of the DPDP Act 2023, Data Principals have statutory rights to revoke consent and demand erasure. Note: Data Protection Board of India rules and active adjudication frameworks are in the process of notification by the Central Government.",
     )
 
 
@@ -850,13 +855,49 @@ def list_dnd_guides_endpoint():
 
 # --- 6. Privacy & Purge ---
 
+@router.get("/privacy/purge/status", response_model=PurgeStatusResponse)
+def purge_status_endpoint():
+    """Returns pre-purge impact metadata, record counts, and target paths."""
+    impact = get_purge_impact()
+    return PurgeStatusResponse(
+        database_path=impact["database_path"],
+        database_exists=impact["database_exists"],
+        database_size_bytes=impact["database_size_bytes"],
+        key_path=impact["key_path"],
+        key_exists=impact["key_exists"],
+        is_default_database=impact["is_default_database"],
+        record_counts=impact["record_counts"],
+        total_records=impact["total_records"],
+        allowed_to_purge=impact["allowed_to_purge"],
+        reason=impact["reason"],
+        warning=impact["warning"],
+    )
+
+
 @router.post("/privacy/purge", response_model=PurgeResponse)
-def purge_endpoint():
-    purge_all_data()
+def purge_endpoint(req: PurgeRequest):
+    """Executes a confirmed purge of the local database and HMAC secret key."""
+    if not req.confirm or req.confirmation_code.strip() != "PURGE":
+        raise HTTPException(
+            status_code=400,
+            detail="Purge cancelled: explicit confirmation code 'PURGE' required."
+        )
+
+    res = purge_all_data(confirmed=req.confirm, confirmation_code=req.confirmation_code)
+    if not res["success"] and "Refused" in res["message"]:
+        raise HTTPException(status_code=403, detail=res["message"])
+
     return PurgeResponse(
-        success=True,
-        message="Cryptographic purge complete. All database tables and HMAC keys have been zero-wiped and reset.",
-        purged_at=utc_now_iso(),
+        success=res["success"],
+        message=res["message"],
+        database_path=res["database_path"],
+        key_path=res["key_path"],
+        tables_dropped=res["tables_dropped"],
+        records_deleted=res["records_deleted"],
+        key_deleted=res["key_deleted"],
+        files_unlinked=res["files_unlinked"],
+        errors=res["errors"],
+        purged_at=res["purged_at"],
     )
 
 

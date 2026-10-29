@@ -16,6 +16,7 @@ class Settings(BaseModel):
     version: str = "1.0.0"
     host: str = os.getenv("NUMBERSHIELD_HOST", "127.0.0.1")
     port: int = int(os.getenv("NUMBERSHIELD_PORT", "8765"))
+    data_dir: Path = DATA_DIR
     db_path: Path = Path(os.getenv("NUMBERSHIELD_DB_PATH", str(DATA_DIR / "numbershield.db")))
     key_path: Path = Path(os.getenv("NUMBERSHIELD_KEY_PATH", str(DATA_DIR / ".numbershield_key")))
     searxng_instance: str = os.getenv("SEARXNG_INSTANCE_URL", "").strip()
