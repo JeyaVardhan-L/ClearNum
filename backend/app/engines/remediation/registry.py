@@ -21,9 +21,15 @@ class RemediationSource:
     processing_time_estimate: str
     requires_email_confirmation: bool
     requires_phone_call: bool
-    statutory_rights: List[str]  # e.g. ["CCPA", "GDPR", "TRAI"]
+    statutory_rights: List[str]  # e.g. ["CCPA", "GDPR", "TRAI", "DPDP Act 2023"]
     contact_email: Optional[str] = None
     notes: Optional[str] = None
+    execution_type: Optional[str] = None
+    verification_status: Optional[str] = None
+    lookup_method: Optional[str] = None
+    can_match_phone: Optional[bool] = None
+    evidence_attribution: Optional[str] = None
+    last_verified_at: Optional[str] = None
 
 
 REMEDIATION_REGISTRY: Dict[str, RemediationSource] = {
@@ -435,6 +441,33 @@ REMEDIATION_REGISTRY: Dict[str, RemediationSource] = {
         notes="Permanent registration managed by the ACMA.",
     ),
 }
+
+# --- Integrate 110+ Curated Indian Sources ---
+from backend.app.engines.remediation.india_registry import INDIAN_SOURCE_INVENTORY
+
+for _tid, _target in INDIAN_SOURCE_INVENTORY.items():
+    REMEDIATION_REGISTRY[_tid] = RemediationSource(
+        source_id=_target.source_id,
+        name=_target.name,
+        category=_target.category_label,
+        domains=_target.domains,
+        official_removal_url=_target.official_url,
+        removal_method=_target.execution_type,
+        instructions=_target.instructions,
+        processing_time_estimate="Immediate" if _target.execution_type == "manual_browser" else "24 to 72 hours",
+        requires_email_confirmation=False,
+        requires_phone_call=False,
+        statutory_rights=_target.statutory_rights,
+        contact_email=_target.grievance_email,
+        notes=f"{_target.category_label} | {_target.known_limitations}",
+        execution_type=_target.execution_type,
+        verification_status=_target.verification_status,
+        lookup_method=_target.lookup_method,
+        can_match_phone=_target.can_match_phone,
+        evidence_attribution=_target.evidence_attribution,
+        last_verified_at=_target.last_verified_at,
+    )
+
 
 
 def lookup_source_by_url(url: str) -> Optional[RemediationSource]:

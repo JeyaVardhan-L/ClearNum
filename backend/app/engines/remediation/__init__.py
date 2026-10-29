@@ -19,6 +19,7 @@ from backend.app.engines.remediation.templates import (
     generate_tcpa_ftc_complaint,
     generate_trai_1909_complaint,
     generate_merchant_unsubscribe,
+    generate_dpdp_act_notice,
 )
 from backend.app.engines.remediation.search_removal import (
     SearchRemovalGuide,
@@ -29,12 +30,26 @@ from backend.app.engines.remediation.dnd_guides import (
     get_dnd_guide_for_country,
     get_all_dnd_guides,
 )
+from backend.app.engines.remediation.india_registry import (
+    INDIAN_SOURCE_INVENTORY,
+    IndianSourceTarget,
+    get_all_indian_sources,
+    get_sources_by_category,
+    get_inventory_summary,
+    get_indian_source_by_id,
+)
 
 __all__ = [
     "REMEDIATION_REGISTRY",
     "RemediationSource",
     "lookup_source_by_url",
     "get_all_sources",
+    "INDIAN_SOURCE_INVENTORY",
+    "IndianSourceTarget",
+    "get_all_indian_sources",
+    "get_sources_by_category",
+    "get_inventory_summary",
+    "get_indian_source_by_id",
     "ActionState",
     "validate_transition",
     "get_state_color_token",

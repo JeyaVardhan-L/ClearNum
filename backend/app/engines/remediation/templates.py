@@ -169,3 +169,58 @@ Sincerely,
         subject_line=f"Revocation of Contact Consent — {phone.masked_display}",
         body_markdown=body,
     )
+
+
+def generate_dpdp_act_notice(
+    phone: NormalizedPhone,
+    business_name: str,
+    grievance_email: Optional[str] = None,
+    target_url: Optional[str] = None,
+) -> GeneratedTemplate:
+    """Generates a formal legal notice under Section 6(4) and Section 12 of India's Digital Personal Data Protection Act, 2023."""
+    today = datetime.date.today().isoformat()
+    recipient_email = grievance_email or "grievance-officer@" + business_name.lower().replace(" ", "") + ".in"
+    url_mention = f"\nSpecific Data Exposure URL: {target_url}" if target_url else ""
+
+    body = f"""FORMAL NOTICE: REVOCATION OF MARKETING CONSENT & DATA ERASURE REQUEST
+Under Section 6(4) and Section 12 of the Digital Personal Data Protection Act (DPDP Act), 2023
+and Rule 5(7) of the Information Technology (Intermediary Guidelines) Rules.
+
+Date: {today}
+To:
+Grievance Officer / Data Protection Officer, {business_name}
+Email: {recipient_email}
+
+Subject: Immediate Revocation of Marketing Consent and Permanent Suppression of Telephone Number {phone.masked_display}
+
+Dear Grievance Officer,
+
+I am writing to formally exercise my statutory rights as a Data Principal under Section 6(4) and Section 12 of the Digital Personal Data Protection Act (DPDP Act), 2023.
+
+1. Revocation of Consent (Section 6(4)):
+I hereby withdraw and revoke all previously granted consent (express, implied, or transactional) permitting {business_name}, its marketing affiliates, and contracted telemarketing agencies to process my personal data for promotional SMS, telemarketing calls, or cross-sell campaigns.
+
+2. Permanent Telephone Number Suppression:
+Please immediately suppress my telephone number from all active outbound campaigns, telemarketing dialers, and promotional databases:
+- Telephone Number (E.164): {phone.e164}
+- Formatted Domestic Variant: {phone.national}
+- Masked Identifier: {phone.masked_display}{url_mention}
+
+3. Erasure of Non-Essential Personal Data (Section 12):
+In accordance with Section 12 of the DPDP Act 2023, please erase and purge all marketing profiles, lead scoring attributes, and contact records associated with my telephone number.
+
+4. Statutory Compliance Confirmation:
+Please confirm compliance with this revocation notice in writing to this email within the statutory timeframe mandated by Indian law. If unsolicited commercial communications continue from your registered DLT headers, this matter will be formally escalated to the Data Protection Board of India and the Telecom Regulatory Authority of India (TRAI).
+
+Yours faithfully,
+Verified Data Principal
+Contact Reference: {phone.masked_display}
+"""
+    return GeneratedTemplate(
+        template_type="DPDP_ACT_2023",
+        title="India DPDP Act 2023 Consent Revocation & Data Erasure Notice",
+        recipient_type="data_fiduciary",
+        subject_line=f"DPDP Act 2023 Notice — Revocation of Consent for {phone.masked_display}",
+        body_markdown=body,
+    )
+
