@@ -28,7 +28,7 @@ export function App() {
   useEffect(() => {
     async function initDefault() {
       try {
-        const parsed = await parsePhone("+14155552671", "US");
+        const parsed = await parsePhone("+918106833178", "IN");
         setCurrentIdentity(parsed);
         const expList = await getExposures(parsed.hmac_id).catch(() => []);
         setExposures(expList);

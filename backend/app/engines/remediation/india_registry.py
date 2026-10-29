@@ -343,7 +343,7 @@ INDIAN_SOURCE_INVENTORY: Dict[str, IndianSourceTarget] = {
     "in_tel_trai_1909": IndianSourceTarget(
         source_id="in_tel_trai_1909",
         name="TRAI 1909 National DND & Complaint Service",
-        official_url="https://www.trai.gov.in/telecom-commercial-communication-customer-preference-regulations-2018",
+        official_url="https://www.trai.gov.in",
         category="B_TELECOM_DLT",
         category_label="Telecom & DLT Sender Intelligence",
         execution_type="user_assisted",
@@ -585,7 +585,7 @@ INDIAN_SOURCE_INVENTORY: Dict[str, IndianSourceTarget] = {
     "in_fin_hdfc": IndianSourceTarget(
         source_id="in_fin_hdfc",
         name="HDFC Bank Do Not Call Registry & Privacy",
-        official_url="https://www.hdfcbank.com/personal/useful-links/privacy/do-not-call-registry",
+        official_url="https://www.hdfcbank.com/personal/useful-links/privacy",
         category="C_FINANCIAL",
         category_label="Banks & Financial Services",
         execution_type="manual_browser",
@@ -611,7 +611,7 @@ INDIAN_SOURCE_INVENTORY: Dict[str, IndianSourceTarget] = {
     "in_fin_sbi": IndianSourceTarget(
         source_id="in_fin_sbi",
         name="State Bank of India (SBI) Do Not Call Registry",
-        official_url="https://sbi.co.in/web/customer-care/do-not-call-registry",
+        official_url="https://sbi.co.in/web/customer-care",
         category="C_FINANCIAL",
         category_label="Banks & Financial Services",
         execution_type="manual_browser",

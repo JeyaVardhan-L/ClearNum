@@ -136,7 +136,7 @@ def analyze_sms_endpoint(req: AnalyzeSMSRequest):
         category = sender_info.category
 
     # TRAI 1909 & Chakshu escalation
-    if req.region.upper() == "IN":
+    if req.region.upper() == "IN" or op_name or circ_desc or matched_brand or req.sender.startswith("+91"):
         trai_data = gen_trai_1909(req.sender, req.message_body)
         complaint_sms = trai_data["formal_syntax"]
 
