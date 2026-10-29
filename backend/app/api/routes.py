@@ -62,6 +62,9 @@ from backend.app.engines.prevention import (
 from backend.app.api.schemas import (
     PhoneParseRequest,
     PhoneParseResponse,
+    SearchConsent,
+    ProviderDisclosureItem,
+    SearchPrivacyDisclosureResponse,
     ScanRequest,
     ScanResponse,
     DiscoveredExposureItem,
@@ -193,6 +196,87 @@ def analyze_sms_endpoint(req: AnalyzeSMSRequest):
 
 # --- 2. Discovery Engine ---
 
+@router.get("/discovery/disclosure", response_model=SearchPrivacyDisclosureResponse)
+@router.post("/discovery/disclosure", response_model=SearchPrivacyDisclosureResponse)
+def get_search_disclosure_endpoint(
+    phone_number: str = Query(""),
+    default_region: str = Query("IN"),
+):
+    """Provides transparent disclosure of which external search providers receive the phone number,
+    the exact query sent, data transmission mechanism, purpose, and privacy implications.
+    Defaults to ASSISTED_MANUAL_SEARCH with zero external data transmission."""
+    norm = parse_and_normalize(phone_number, default_region) if phone_number else None
+    phone_display = norm.e164 if (norm and norm.e164) else phone_number
+    masked = norm.masked_display if (norm and norm.masked_display) else mask_phone_number(phone_number)
+    digits = norm.digits_only if norm else re.sub(r"\D", "", phone_number)
+
+    providers_info = [
+        ProviderDisclosureItem(
+            provider_id="duckduckgo",
+            provider_name="DuckDuckGo HTML",
+            endpoint="https://html.duckduckgo.com/html/",
+            exact_query_sent=f'"{phone_display}"',
+            masked_query_preview=f'"{masked}"',
+            data_transmitted="Telephone string sent via HTTPS POST in form payload.",
+            purpose="Searches open web text, public classifieds, and directories for exact phone matches.",
+            privacy_risk="DuckDuckGo receives your unmasked phone query in its server web access logs.",
+        ),
+        ProviderDisclosureItem(
+            provider_id="searxng",
+            provider_name="SearXNG Meta-Search",
+            endpoint="http://127.0.0.1:8080/search (or configured instance)",
+            exact_query_sent=f'"{phone_display}"',
+            masked_query_preview=f'"{masked}"',
+            data_transmitted="Telephone string sent via HTTP/HTTPS GET parameter.",
+            purpose="Aggregates search indices across multiple search engines with local privacy proxying.",
+            privacy_risk="SearXNG instance receives query. Local instances preserve privacy; public instances log incoming requests.",
+        ),
+        ProviderDisclosureItem(
+            provider_id="wayback",
+            provider_name="Internet Archive (Wayback CDX)",
+            endpoint="https://web.archive.org/cdx/search/cdx",
+            exact_query_sent=f"*{digits}*",
+            masked_query_preview=f"*•••{digits[-4:] if len(digits) >= 4 else ''}*",
+            data_transmitted="Wildcard URL pattern sent via HTTPS GET query.",
+            purpose="Scans historical archived URL paths (pastebins, text dumps) for matching telephone digits.",
+            privacy_risk="Internet Archive servers log incoming CDX search queries.",
+        ),
+        ProviderDisclosureItem(
+            provider_id="wikimedia",
+            provider_name="Wikimedia / Wikipedia API",
+            endpoint="https://en.wikipedia.org/w/api.php",
+            exact_query_sent=phone_display,
+            masked_query_preview=masked,
+            data_transmitted="Telephone string sent via HTTPS GET to MediaWiki search API.",
+            purpose="Checks public Wikipedia talk pages, user profiles, and open leaks for unauthorized phone listings.",
+            privacy_risk="Wikimedia Foundation server logs capture search queries.",
+        ),
+        ProviderDisclosureItem(
+            provider_id="hackernews",
+            provider_name="Hacker News (Algolia API)",
+            endpoint="https://hn.algolia.com/api/v1/search",
+            exact_query_sent=phone_display,
+            masked_query_preview=masked,
+            data_transmitted="Telephone string sent via HTTPS GET to Algolia search API.",
+            purpose="Checks public Hacker News discussions, Ask HN hiring threads, and comments for exposed phone contact.",
+            privacy_risk="Algolia cloud search servers log API queries.",
+        ),
+    ]
+
+    return SearchPrivacyDisclosureResponse(
+        identity_hmac=norm.hmac_id if norm else "",
+        masked_phone=masked,
+        default_mode="ASSISTED_MANUAL_SEARCH",
+        notice=(
+            "Privacy Notice: External search engines process queries on third-party servers. "
+            "To prevent transmitting your phone number over external networks, ClearNum defaults to Assisted Manual Search, "
+            "which generates site-specific dorks that you execute in your own local browser without sending data through our backend. "
+            "You may explicitly authorize automated querying on a per-provider basis below."
+        ),
+        providers=providers_info,
+    )
+
+
 @router.post("/discovery/scan", response_model=ScanResponse)
 async def scan_discovery_endpoint(req: ScanRequest):
     norm = parse_and_normalize(req.phone_number, req.default_region)
@@ -217,34 +301,57 @@ async def scan_discovery_endpoint(req: ScanRequest):
     ))
     conn.commit()
 
+    # Enforce Privacy-First Consent Guard:
+    # External providers are strictly NOT contacted unless the user explicitly opts in.
+    consent_granted = False
+    authorized_providers = set()
+    if req.consent and req.consent.granted:
+        consent_granted = True
+        authorized_providers = set(req.consent.confirmed_providers) if req.consent.confirmed_providers else set(req.providers)
+    elif req.external_search_consent:
+        consent_granted = True
+        authorized_providers = set(req.providers)
+
     all_provider_results: List[ProviderResult] = []
     provider_outcomes: List[ProviderOutcomeItem] = []
 
-    # Run chosen providers
-    provider_factories = {
-        "searxng": (SearXNGProvider, 12),
-        "duckduckgo": (DuckDuckGoProvider, 12),
-        "wikimedia": (WikimediaProvider, 10),
-        "hackernews": (HackerNewsProvider, 10),
-        "wayback": (WaybackProvider, 10),
-    }
+    if not consent_granted:
+        # PRIVACY-FIRST DEFAULT: Zero external transmission without explicit consent
+        for p_id in req.providers:
+            provider_outcomes.append(ProviderOutcomeItem(
+                provider_id=p_id,
+                status="unconfigured",
+                result_count=0,
+                duration_ms=0,
+                retryable=False,
+                diagnostic="External search skipped: requires explicit user opt-in consent to protect phone privacy. Use Assisted Manual Search Dorks below.",
+            ))
+    else:
+        # Run only authorized providers
+        provider_factories = {
+            "searxng": (SearXNGProvider, 12),
+            "duckduckgo": (DuckDuckGoProvider, 12),
+            "wikimedia": (WikimediaProvider, 10),
+            "hackernews": (HackerNewsProvider, 10),
+            "wayback": (WaybackProvider, 10),
+        }
 
-    for p_id in req.providers:
-        if p_id in provider_factories:
-            cls_factory, max_r = provider_factories[p_id]
-            provider_inst = cls_factory()
-            res = await provider_inst.search(norm, max_results=max_r)
-            all_provider_results.extend(res)
-            if res.outcome:
-                provider_outcomes.append(ProviderOutcomeItem(
-                    provider_id=res.outcome.provider_id,
-                    status=res.outcome.status.value,
-                    result_count=res.outcome.result_count,
-                    duration_ms=res.outcome.duration_ms,
-                    retryable=res.outcome.retryable,
-                    diagnostic=res.outcome.diagnostic,
-                    last_successful_check=res.outcome.last_successful_check,
-                ))
+        for p_id in req.providers:
+            if p_id in authorized_providers and p_id in provider_factories:
+                cls_factory, max_r = provider_factories[p_id]
+                provider_inst = cls_factory()
+                res = await provider_inst.search(norm, max_results=max_r)
+                all_provider_results.extend(res)
+                if res.outcome:
+                    provider_outcomes.append(ProviderOutcomeItem(
+                        provider_id=res.outcome.provider_id,
+                        status=res.outcome.status.value,
+                        result_count=res.outcome.result_count,
+                        duration_ms=res.outcome.duration_ms,
+                        retryable=res.outcome.retryable,
+                        diagnostic=res.outcome.diagnostic,
+                        last_successful_check=res.outcome.last_successful_check,
+                    ))
 
     # Process user-supplied target URLs safely with SSRF protection
     if req.target_urls:
@@ -347,6 +454,13 @@ async def scan_discovery_endpoint(req: ScanRequest):
             rem_status = act_row["status"]
             official_removal_url = act_row["official_url"]
 
+        # Canonical URL stripping tracking parameters and query strings
+        canonical_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
+        matched_repr = match_eval.matched_text if (match_eval and match_eval.matched_text) else norm.masked_display
+        match_class = getattr(match_eval, "match_classification", "POSSIBLE_MATCH") if match_eval.matched else "INCONCLUSIVE"
+        conf_expl = getattr(match_eval, "confidence_explanation", "") if match_eval.matched else "Probabilistic search snippet match."
+        is_ex = getattr(match_eval, "is_example_or_test", False)
+
         discovered_items.append(DiscoveredExposureItem(
             id=exposure_id,
             source_id=source_id,
@@ -360,6 +474,12 @@ async def scan_discovery_endpoint(req: ScanRequest):
             last_checked_at=now_iso,
             remediation_status=rem_status,
             official_removal_url=official_removal_url,
+            canonical_url=canonical_url,
+            matched_representation=matched_repr,
+            match_classification=match_class,
+            confidence_explanation=conf_expl,
+            provider_status="HEALTHY",
+            is_example_or_test=is_ex,
         ))
 
     conn.commit()
@@ -376,6 +496,12 @@ async def scan_discovery_endpoint(req: ScanRequest):
     else:
         scan_status = "partial_failure"
 
+    privacy_notice = (
+        "External search executed across authorized providers."
+        if consent_granted
+        else "Privacy-first default: external search skipped without explicit consent. Assisted manual search dorks generated below for zero-leakage local inspection."
+    )
+
     return ScanResponse(
         identity_hmac=norm.hmac_id,
         masked_phone=norm.masked_display,
@@ -384,6 +510,9 @@ async def scan_discovery_endpoint(req: ScanRequest):
         manual_dorks_count=len(dorks),
         provider_outcomes=provider_outcomes,
         scan_status=scan_status,
+        consent_granted=consent_granted,
+        external_search_conducted=bool(consent_granted and all_provider_results),
+        privacy_notice=privacy_notice,
     )
 
 
@@ -416,6 +545,12 @@ def list_exposures_endpoint(identity_hmac: str):
             last_checked_at=r["last_checked_at"],
             remediation_status=r["remediation_status"] or "DISCOVERED",
             official_removal_url=r["official_removal_url"],
+            canonical_url=r["url"].split("#")[0].split("?")[0].rstrip("/"),
+            matched_representation=None,
+            match_classification="CONFIRMED_MATCH" if r["match_type"] == "EXACT" else ("POSSIBLE_MATCH" if r["match_type"] == "PROBABLE" else "INCONCLUSIVE"),
+            confidence_explanation="Stored exposure record from previous discovery run.",
+            provider_status="RECORDED",
+            is_example_or_test=False,
         )
         for r in rows
     ]
@@ -463,6 +598,9 @@ def list_remediation_sources_endpoint():
             "can_match_phone": getattr(s, "can_match_phone", True),
             "evidence_attribution": getattr(s, "evidence_attribution", None) or "Web presence",
             "last_verified_at": getattr(s, "last_verified_at", None) or "2026-10-29T11:00:00Z",
+            "capability_category": s.capability_category,
+            "capability_description": s.capability_description,
+            "truth_notice": s.truth_notice,
         }
         for s in sources
     ]
@@ -492,6 +630,9 @@ def get_india_inventory_endpoint():
             grievance_email=t.grievance_email,
             customer_care_phone=t.customer_care_phone,
             domains=t.domains,
+            capability_category=t.capability_category,
+            capability_description=t.capability_description,
+            truth_notice=t.truth_notice,
         )
         for t in get_all_indian_sources()
     ]

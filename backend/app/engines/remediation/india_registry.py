@@ -17,8 +17,49 @@ Every source records:
 """
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+
+
+def classify_source_capability(
+    execution_type: str,
+    verification_status: str,
+    can_match_phone: bool,
+    official_url: str = "",
+) -> Tuple[str, str, str]:
+    """Classifies a source into one of four truthful categories:
+    1. Automated public-web lookup
+    2. Assisted manual browser search
+    3. Remediation or opt-out resource
+    4. Unavailable or unverified source
+    Returns (category_name, capability_description, truth_notice).
+    """
+    if verification_status in ("blocked", "unverified_candidate", "unsupported"):
+        return (
+            "Unavailable or unverified source",
+            "This source is currently unverified, behind active anti-bot blocking, or unsupported for automated interaction.",
+            "Cannot be used for automated lookup or immediate verification. Manual inspection required.",
+        )
+
+    if execution_type == "automated_lookup" and can_match_phone:
+        return (
+            "Automated public-web lookup",
+            "ClearNum performs automated queries against publicly accessible endpoints to scan for phone number mentions.",
+            "An HTTP 200 response proves only endpoint availability; it does not prove an exposure exists.",
+        )
+
+    if execution_type in ("manual_browser", "user_assisted") or (can_match_phone and execution_type != "remediation_only"):
+        return (
+            "Assisted manual browser search",
+            "Generates targeted search queries and site-specific dorks for direct inspection in your local browser, bypassing anti-bot firewalls without cloud dependencies.",
+            "Executing a search query does not imply an exposure exists until a matching record is personally verified in browser results.",
+        )
+
+    return (
+        "Remediation or opt-out resource",
+        "Official regulatory, DLT, or grievance redressal portal for statutory consent revocation (DPDP Act Sec 6(4)) and opt-out demands.",
+        "This portal does NOT search for or index telephone numbers; it is an opt-out, DND, or enforcement escalation endpoint.",
+    )
 
 
 @dataclass
@@ -42,6 +83,24 @@ class IndianSourceTarget:
     grievance_email: Optional[str] = None
     customer_care_phone: Optional[str] = None
     domains: List[str] = field(default_factory=list)
+
+    @property
+    def capability_info(self) -> Tuple[str, str, str]:
+        return classify_source_capability(
+            self.execution_type, self.verification_status, self.can_match_phone, self.official_url
+        )
+
+    @property
+    def capability_category(self) -> str:
+        return self.capability_info[0]
+
+    @property
+    def capability_description(self) -> str:
+        return self.capability_info[1]
+
+    @property
+    def truth_notice(self) -> str:
+        return self.capability_info[2]
 
 
 NOW_VERIFIED = "2026-10-29T11:00:00Z"

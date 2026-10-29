@@ -13,6 +13,7 @@ import {
   Filter,
   BookOpen,
   Sparkles,
+  HelpCircle,
 } from "lucide-react";
 import type { RemediationSource, PhoneParseResult, GeneratedTemplate } from "../types";
 import { getRemediationSources, generateLegalTemplate } from "../api";
@@ -30,6 +31,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
   const [loadingSources, setLoadingSources] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("ALL");
+  const [capabilityFilter, setCapabilityFilter] = useState("ALL");
   const [activeTab, setActiveTab] = useState<"directory" | "templates" | "searchengines">("directory");
 
   // Template state
@@ -62,11 +64,13 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
 
   const filteredSources = sources.filter((s) => {
     const matchesCategory = categoryFilter === "ALL" || s.category === categoryFilter;
+    const matchesCapability =
+      capabilityFilter === "ALL" || (s.capability_category && s.capability_category === capabilityFilter);
     const matchesSearch =
       searchQuery === "" ||
       s.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       s.domains.some((d) => d.toLowerCase().includes(searchQuery.toLowerCase()));
-    return matchesCategory && matchesSearch;
+    return matchesCategory && matchesCapability && matchesSearch;
   });
 
   const handleGenerateTemplate = async (e: React.FormEvent) => {
@@ -171,6 +175,35 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
       {/* Directory Tab */}
       {activeTab === "directory" && (
         <div className="space-y-4">
+          {/* Truth in Source Capabilities Banner */}
+          <div className="card p-4 border-cyan-900/40 bg-[#09111e] space-y-3">
+            <div className="flex items-center gap-2 font-bold text-xs text-[var(--pixel-cyan)]">
+              <HelpCircle className="w-4 h-4 shrink-0" />
+              <span>TRUTH IN SOURCE CAPABILITIES</span>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5 text-[11px]">
+              <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-1">
+                <span className="font-bold text-emerald-400">🌐 Automated Lookup</span>
+                <p className="text-[10px] text-[var(--text-muted)] leading-tight">Searches open URL paths and text archives automatically via ClearNum.</p>
+              </div>
+              <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-1">
+                <span className="font-bold text-cyan-400">🔍 Assisted Manual Search</span>
+                <p className="text-[10px] text-[var(--text-muted)] leading-tight">Pre-computed targeted dorks to inspect in your browser without bot blocks.</p>
+              </div>
+              <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-1">
+                <span className="font-bold text-purple-400">🛡️ Remediation Resource</span>
+                <p className="text-[10px] text-[var(--text-muted)] leading-tight">Statutory rights and opt-out portals. Does NOT search for numbers.</p>
+              </div>
+              <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-1">
+                <span className="font-bold text-amber-400">⚠️ Unavailable / Unverified</span>
+                <p className="text-[10px] text-[var(--text-muted)] leading-tight">Subscription-only or blocked by firewalls. Direct lookup unsupported.</p>
+              </div>
+            </div>
+            <p className="text-[11px] text-[var(--text-dim)] italic border-t border-[var(--border-subtle)] pt-2 leading-relaxed">
+              * Invariant: Remediation portals (e.g. TRAI 1909, DLT gateways, Banking Grievance officers) do NOT index or search for citizen phone numbers. Furthermore, reachability of an official URL (HTTP 200) verifies server status only; it does not prove an exposure exists.
+            </p>
+          </div>
+
           {/* Filter Bar */}
           <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 card p-3">
             <div className="relative flex-1">
@@ -183,12 +216,23 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 className="input-field pl-8 py-1.5 text-xs"
               />
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2">
               <Filter className="w-3.5 h-3.5 text-[var(--text-dim)]" />
+              <select
+                value={capabilityFilter}
+                onChange={(e) => setCapabilityFilter(e.target.value)}
+                className="input-field py-1.5 text-xs min-w-[160px]"
+              >
+                <option value="ALL">All Capability Tiers</option>
+                <option value="Automated public-web lookup">🌐 Automated Lookup</option>
+                <option value="Assisted manual browser search">🔍 Assisted Manual Search</option>
+                <option value="Remediation or opt-out resource">🛡️ Remediation / Opt-Out</option>
+                <option value="Unavailable or unverified source">⚠️ Unavailable / Unverified</option>
+              </select>
               <select
                 value={categoryFilter}
                 onChange={(e) => setCategoryFilter(e.target.value)}
-                className="input-field py-1.5 text-xs min-w-[150px]"
+                className="input-field py-1.5 text-xs min-w-[140px]"
               >
                 {categories.map((c) => (
                   <option key={c} value={c}>
@@ -215,11 +259,26 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 >
                   <div className="space-y-2.5">
                     <div className="flex items-start justify-between gap-2">
-                      <div>
+                      <div className="space-y-1">
                         <h3 className="text-sm font-bold text-[var(--text-main)]">{source.name}</h3>
-                        <span className="text-[11px] text-[var(--pixel-cyan)] font-medium">
-                          {source.category}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-[11px] text-[var(--pixel-cyan)] font-medium">
+                            {source.category}
+                          </span>
+                          {source.capability_category && (
+                            <span className={`kicker-tag text-[9px] ${
+                              source.capability_category.includes("Automated")
+                                ? "text-emerald-400 border-emerald-800"
+                                : source.capability_category.includes("Assisted")
+                                ? "text-cyan-400 border-cyan-800"
+                                : source.capability_category.includes("Remediation")
+                                ? "text-purple-400 border-purple-800"
+                                : "text-amber-400 border-amber-800"
+                            }`}>
+                              {source.capability_category}
+                            </span>
+                          )}
+                        </div>
                       </div>
                       <span className="status-pill pill-pixel-purple text-[9px] flex items-center gap-1">
                         <Clock className="w-3 h-3" />

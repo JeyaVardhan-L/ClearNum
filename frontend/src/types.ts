@@ -43,6 +43,31 @@ export interface DiscoveredExposure {
   remediation_status: string;
   official_removal_url?: string;
   match_rationale?: string;
+  canonical_url?: string;
+  matched_representation?: string;
+  match_classification?: "CONFIRMED_MATCH" | "POSSIBLE_MATCH" | "INCIDENTAL_MENTION" | "INCONCLUSIVE" | "FALSE_POSITIVE";
+  confidence_explanation?: string;
+  provider_status?: string;
+  is_example_or_test?: boolean;
+}
+
+export interface ProviderDisclosureItem {
+  provider_id: string;
+  provider_name: string;
+  endpoint: string;
+  exact_query_sent: string;
+  masked_query_preview: string;
+  data_transmitted: string;
+  purpose: string;
+  privacy_risk: string;
+}
+
+export interface SearchPrivacyDisclosureResponse {
+  identity_hmac: string;
+  masked_phone: string;
+  default_mode: string;
+  notice: string;
+  providers: ProviderDisclosureItem[];
 }
 
 export interface RemediationSource {
@@ -65,6 +90,9 @@ export interface RemediationSource {
   can_match_phone?: boolean;
   evidence_attribution?: string;
   last_verified_at?: string;
+  capability_category?: string;
+  capability_description?: string;
+  truth_notice?: string;
 }
 
 export interface IndianSourceTarget {
@@ -87,6 +115,9 @@ export interface IndianSourceTarget {
   grievance_email?: string;
   customer_care_phone?: string;
   domains: string[];
+  capability_category?: string;
+  capability_description?: string;
+  truth_notice?: string;
 }
 
 export interface InventorySummary {

@@ -118,19 +118,41 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     }
   };
 
-  const getMatchBadge = (matchType: string) => {
-    switch (matchType) {
-      case "EXACT":
-        return <span className="status-pill pill-pixel-green font-mono">Exact Match</span>;
-      case "PROBABLE":
-        return <span className="status-pill pill-pixel-cyan font-mono">Probable Match</span>;
-      case "WEAK":
-        return <span className="status-pill pill-pixel-yellow font-mono">Weak Match</span>;
+  const getMatchBadge = (matchType: string, classification?: string, isExample?: boolean) => {
+    const classType = classification || (matchType === "EXACT" ? "CONFIRMED_MATCH" : matchType === "PROBABLE" ? "POSSIBLE_MATCH" : "INCONCLUSIVE");
+
+    let badge;
+    switch (classType) {
+      case "CONFIRMED_MATCH":
+        badge = <span className="status-pill pill-pixel-green font-mono text-[10px]">Exact Match (Confirmed)</span>;
+        break;
+      case "POSSIBLE_MATCH":
+        badge = <span className="status-pill pill-pixel-cyan font-mono text-[10px]">Probable Match (Possible)</span>;
+        break;
+      case "INCIDENTAL_MENTION":
+        badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px]">Incidental Mention</span>;
+        break;
+      case "INCONCLUSIVE":
+        badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px] text-amber-400">Inconclusive</span>;
+        break;
       case "FALSE_POSITIVE":
-        return <span className="status-pill pill-pixel-purple font-mono">False Positive</span>;
+        badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">False Positive</span>;
+        break;
       default:
-        return <span className="status-pill pill-pixel-purple font-mono">{matchType}</span>;
+        badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">{matchType}</span>;
     }
+
+    if (isExample) {
+      return (
+        <div className="flex flex-col gap-1">
+          {badge}
+          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300">
+            Documentation / Dummy
+          </span>
+        </div>
+      );
+    }
+    return badge;
   };
 
   const getStatusBadge = (status: string) => {
@@ -374,34 +396,45 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                       </div>
                       <div
                         className="font-mono text-[10px] text-[var(--text-dim)] truncate max-w-xs mt-0.5"
-                        title={exp.url}
+                        title={exp.canonical_url || exp.url}
                       >
-                        {exp.url}
+                        <span className="text-[var(--text-dim)]">Canonical: </span>
+                        {exp.canonical_url || exp.url}
                       </div>
-                      <div className="text-[10px] text-[var(--text-dim)] mt-0.5">
-                        Discovered:{" "}
-                        {exp.discovered_at
-                          ? new Date(exp.discovered_at).toLocaleDateString()
-                          : "Recent"}
+                      <div className="text-[10px] text-[var(--text-dim)] mt-0.5 flex items-center gap-2">
+                        <span>Discovered: {exp.discovered_at ? new Date(exp.discovered_at).toLocaleDateString() : "Recent"}</span>
+                        {exp.provider_status && (
+                          <span className="kicker-tag text-[8px] py-0">{exp.provider_status}</span>
+                        )}
                       </div>
                     </td>
 
-                    {/* Snippet */}
+                    {/* Snippet & Evidence */}
                     <td>
                       <div className="text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed font-mono">
                         {exp.snippet || "No textual context snippet available."}
                       </div>
-                      <div className="text-[10px] text-[var(--text-dim)] mt-1">
-                        Source Registry: <span className="text-[var(--pixel-cyan)] font-mono">{exp.source_id}</span>
+                      <div className="text-[10px] text-[var(--text-dim)] mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                        <div>
+                          Matched: <span className="font-mono text-[var(--pixel-cyan)] font-semibold">{exp.matched_representation || currentIdentity?.masked_display || "Masked"}</span>
+                        </div>
+                        <div>
+                          Source: <span className="text-[var(--pixel-cyan)] font-mono">{exp.source_id}</span>
+                        </div>
                       </div>
+                      {exp.confidence_explanation && (
+                        <div className="text-[10px] text-[var(--text-dim)] mt-1 italic">
+                          {exp.confidence_explanation}
+                        </div>
+                      )}
                     </td>
 
-                    {/* Match Confidence */}
+                    {/* Match Confidence & Classification */}
                     <td>
                       <div className="space-y-1">
-                        {getMatchBadge(exp.match_type)}
+                        {getMatchBadge(exp.match_type, exp.match_classification, exp.is_example_or_test)}
                         <div className="text-[10px] text-[var(--text-dim)] font-mono">
-                          Score: {(exp.confidence * 100).toFixed(0)}%
+                          Confidence: {(exp.confidence * 100).toFixed(0)}%
                         </div>
                       </div>
                     </td>

@@ -25,11 +25,37 @@ class PhoneParseResponse(BaseModel):
     search_queries: List[str]
 
 
+class SearchConsent(BaseModel):
+    granted: bool = Field(default=False, description="Explicit user opt-in consent to transmit phone query to third-party search providers")
+    confirmed_providers: List[str] = Field(default_factory=list, description="Specific external providers authorized by user")
+
+
+class ProviderDisclosureItem(BaseModel):
+    provider_id: str
+    provider_name: str
+    endpoint: str
+    exact_query_sent: str
+    masked_query_preview: str
+    data_transmitted: str
+    purpose: str
+    privacy_risk: str
+
+
+class SearchPrivacyDisclosureResponse(BaseModel):
+    identity_hmac: str
+    masked_phone: str
+    default_mode: str = "ASSISTED_MANUAL_SEARCH"
+    notice: str
+    providers: List[ProviderDisclosureItem]
+
+
 class ScanRequest(BaseModel):
     phone_number: str
     default_region: str = "IN"
-    providers: List[str] = Field(default_factory=lambda: ["searxng", "duckduckgo", "wikimedia", "hackernews"])
+    providers: List[str] = Field(default_factory=lambda: ["searxng", "duckduckgo", "wikimedia", "hackernews", "wayback"])
     target_urls: Optional[List[str]] = Field(default_factory=list, description="Optional user-supplied URLs to scan")
+    consent: Optional[SearchConsent] = Field(default=None, description="Explicit user search consent container")
+    external_search_consent: bool = Field(default=False, description="Direct opt-in flag for external search engines")
 
 
 class DiscoveredExposureItem(BaseModel):
@@ -46,6 +72,12 @@ class DiscoveredExposureItem(BaseModel):
     remediation_status: Optional[str] = None
     official_removal_url: Optional[str] = None
     match_rationale: Optional[str] = None
+    canonical_url: Optional[str] = None
+    matched_representation: Optional[str] = None
+    match_classification: Optional[str] = "INCONCLUSIVE"  # CONFIRMED_MATCH, POSSIBLE_MATCH, INCIDENTAL_MENTION, INCONCLUSIVE, FALSE_POSITIVE
+    confidence_explanation: Optional[str] = None
+    provider_status: Optional[str] = None
+    is_example_or_test: bool = False
 
 
 class ProviderOutcomeItem(BaseModel):
@@ -66,6 +98,9 @@ class ScanResponse(BaseModel):
     manual_dorks_count: int
     provider_outcomes: List[ProviderOutcomeItem] = Field(default_factory=list)
     scan_status: str = Field(default="complete", description="'complete', 'partial_failure', or 'all_failed'")
+    consent_granted: bool = False
+    external_search_conducted: bool = False
+    privacy_notice: str = ""
 
 
 class ManualDorkItem(BaseModel):
@@ -210,6 +245,9 @@ class IndianSourceTargetItem(BaseModel):
     grievance_email: Optional[str] = None
     customer_care_phone: Optional[str] = None
     domains: List[str]
+    capability_category: str = "Remediation or opt-out resource"
+    capability_description: str = ""
+    truth_notice: str = ""
 
 
 class InventorySummaryResponse(BaseModel):

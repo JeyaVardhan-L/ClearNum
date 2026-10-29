@@ -21,6 +21,7 @@ import type {
   AnalyzeSmsResult,
   PurgeStatusResponse,
   PurgeResponse,
+  SearchPrivacyDisclosureResponse,
 } from "./types";
 
 const API_BASE = import.meta.env.VITE_API_URL || "/api";
@@ -35,11 +36,22 @@ export async function parsePhone(phoneNumber: string, defaultRegion: string = "I
   return res.json();
 }
 
+export async function getSearchPrivacyDisclosure(
+  phoneNumber: string,
+  defaultRegion: string = "IN"
+): Promise<SearchPrivacyDisclosureResponse> {
+  const params = new URLSearchParams({ phone_number: phoneNumber, default_region: defaultRegion });
+  const res = await fetch(`${API_BASE}/discovery/disclosure?${params}`);
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
 export async function scanDiscovery(
   phoneNumber: string,
   defaultRegion: string = "IN",
   providers: string[] = ["searxng", "duckduckgo"],
-  targetUrls: string[] = []
+  targetUrls: string[] = [],
+  consent?: { granted: boolean; confirmed_providers?: string[] }
 ): Promise<{
   identity_hmac: string;
   masked_phone: string;
@@ -48,6 +60,9 @@ export async function scanDiscovery(
   manual_dorks_count?: number;
   provider_outcomes?: ProviderOutcome[];
   scan_status?: "complete" | "partial_failure" | "all_failed";
+  consent_granted?: boolean;
+  external_search_conducted?: boolean;
+  privacy_notice?: string;
 }> {
   const res = await fetch(`${API_BASE}/discovery/scan`, {
     method: "POST",
@@ -57,6 +72,8 @@ export async function scanDiscovery(
       default_region: defaultRegion,
       providers,
       target_urls: targetUrls,
+      consent: consent || { granted: false },
+      external_search_consent: consent?.granted || false,
     }),
   });
   if (!res.ok) throw new Error(await res.text());

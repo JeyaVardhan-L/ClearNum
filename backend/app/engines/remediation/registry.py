@@ -5,7 +5,7 @@ major data brokers, people directories, search engines, and regulatory bodies.
 """
 
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict
+from typing import List, Optional, Dict, Tuple
 from urllib.parse import urlparse
 
 
@@ -30,6 +30,26 @@ class RemediationSource:
     can_match_phone: Optional[bool] = None
     evidence_attribution: Optional[str] = None
     last_verified_at: Optional[str] = None
+
+    @property
+    def capability_info(self) -> Tuple[str, str, str]:
+        from backend.app.engines.remediation.india_registry import classify_source_capability
+        exec_type = self.execution_type or self.removal_method
+        ver_status = self.verification_status or "accessible_manual"
+        can_match = self.can_match_phone if self.can_match_phone is not None else (self.category in ("people_directory", "public_paste"))
+        return classify_source_capability(exec_type, ver_status, can_match, self.official_removal_url)
+
+    @property
+    def capability_category(self) -> str:
+        return self.capability_info[0]
+
+    @property
+    def capability_description(self) -> str:
+        return self.capability_info[1]
+
+    @property
+    def truth_notice(self) -> str:
+        return self.capability_info[2]
 
 
 REMEDIATION_REGISTRY: Dict[str, RemediationSource] = {

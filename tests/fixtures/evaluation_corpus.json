@@ -181,7 +181,7 @@
     "origin": "East Asian typography with fullwidth Unicode digits",
     "phone_input": "+14155552671",
     "region": "US",
-    "content": "緊急連絡先: ＋１４１５５５５２６７１ までご連絡ください。",
+    "content": "\u7dca\u6025\u9023\u7d61\u5148: \uff0b\uff11\uff14\uff11\uff15\uff15\uff15\uff15\uff12\uff16\uff17\uff11 \u307e\u3067\u3054\u9023\u7d61\u304f\u3060\u3055\u3044\u3002",
     "expected_matched": true,
     "expected_tier": "EXACT",
     "is_negative_control": false
@@ -240,5 +240,115 @@
     "expected_matched": false,
     "expected_tier": "NONE",
     "is_negative_control": true
+  },
+  {
+    "id": "eval_23_india_national_spaced",
+    "name": "India Mobile Spaced National Representation",
+    "origin": "Simulated local vendor SMS contact block",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "Contact vendor at 98765 43210 for GST tax invoice and dispatch confirmation.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_24_india_national_dashed",
+    "name": "India Mobile Dashed Format",
+    "origin": "Simulated delivery courier dispatch sheet",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "Delivery partner mobile: 98765-43210 for gate security verification.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_25_india_parenthesized_std",
+    "name": "India Landline with Parenthesized STD Code",
+    "origin": "Simulated Delhi regional corporate directory",
+    "phone_input": "+911123456789",
+    "region": "IN",
+    "content": "Corporate headquarters: (011) 2345 6789 (Ext 401) Connaught Place, New Delhi.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_26_false_positive_transaction_id",
+    "name": "False Positive Rejection: Banking Transaction ID",
+    "origin": "Negative control pattern (TXN prefix followed by 10 digits)",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "UPI Payment Status: Reference TXN9876543210 settled to merchant account successfully.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_27_false_positive_invoice_number",
+    "name": "False Positive Rejection: Billing Invoice Number",
+    "origin": "Negative control pattern (INV- prefix with digits)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Monthly invoice generated: INV-14155552671. Amount due: $84.20. Pay by net banking.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_28_false_positive_order_number",
+    "name": "False Positive Rejection: E-Commerce Order Number",
+    "origin": "Negative control pattern (ORDER- followed by 10 digits)",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "Shipment dispatched: Package tracking for ORDER-9876543210 is out for delivery.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_29_documentation_example_marked",
+    "name": "Documentation: Explicit Sample / Example Number",
+    "origin": "Developer portal documentation snippet with e.g. indicator",
+    "phone_input": "+919876543210",
+    "region": "IN",
+    "content": "API schema validation: Pass your primary mobile number (e.g. 9876543210) to register.",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_30_date_dd_mm_yyyy",
+    "name": "False Positive Rejection: Date in DD/MM/YYYY Format",
+    "origin": "Negative control pattern (multiple slashes resembling telephone separators)",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "Certificate issued 14/05/1995 and valid until audit window 26/07/2031.",
+    "expected_matched": false,
+    "expected_tier": "NONE",
+    "is_negative_control": true
+  },
+  {
+    "id": "eval_31_repeated_digits_dummy",
+    "name": "Documentation: Repeated Digits Test Number",
+    "origin": "Dummy sample using repeating digit sequence",
+    "phone_input": "+919999999999",
+    "region": "IN",
+    "content": "Test database fixture contains support placeholder contact: +91 99999 99999.",
+    "expected_matched": true,
+    "expected_tier": "EXACT",
+    "is_negative_control": false
+  },
+  {
+    "id": "eval_32_canonical_url_deduplication",
+    "name": "Canonical URL Normalization Test",
+    "origin": "Web page URL with query parameters and fragment anchors",
+    "phone_input": "+14155552671",
+    "region": "US",
+    "content": "<a href='https://example.com/profile?user=123&utm_source=test#contact'>Call Jane at 415-555-2671</a>",
+    "expected_matched": true,
+    "expected_tier": "PROBABLE",
+    "is_negative_control": false
   }
 ]

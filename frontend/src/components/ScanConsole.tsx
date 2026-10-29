@@ -3,6 +3,7 @@ import {
   Search,
   ExternalLink,
   ShieldCheck,
+  ShieldAlert,
   Info,
   Check,
   Copy,
@@ -13,8 +14,22 @@ import {
   Upload,
   HelpCircle,
 } from "lucide-react";
-import type { PhoneParseResult, ManualDorkItem, ProviderOutcome, AnalyzeSmsResult, DiscoveredSMSSender } from "../types";
-import { parsePhone, scanDiscovery, getManualDorks, analyzeSmsMessage, uploadSmsFile } from "../api";
+import type {
+  PhoneParseResult,
+  ManualDorkItem,
+  ProviderOutcome,
+  AnalyzeSmsResult,
+  DiscoveredSMSSender,
+  SearchPrivacyDisclosureResponse,
+} from "../types";
+import {
+  parsePhone,
+  scanDiscovery,
+  getManualDorks,
+  analyzeSmsMessage,
+  uploadSmsFile,
+  getSearchPrivacyDisclosure,
+} from "../api";
 
 interface ScanConsoleProps {
   currentIdentity: PhoneParseResult | null;
@@ -106,6 +121,13 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
   const [importedSenders, setImportedSenders] = useState<DiscoveredSMSSender[]>([]);
   const [copiedText, setCopiedText] = useState<string | null>(null);
 
+  // Privacy-first search mode: default to manual (Assisted Manual Search)
+  const [searchMode, setSearchMode] = useState<"manual" | "automated">("manual");
+  const [showDisclosureModal, setShowDisclosureModal] = useState(false);
+  const [disclosureData, setDisclosureData] = useState<SearchPrivacyDisclosureResponse | null>(null);
+  const [loadingDisclosure, setLoadingDisclosure] = useState(false);
+  const [consentOptIn, setConsentOptIn] = useState(false);
+
   // Live normalization as user types
   useEffect(() => {
     if (!phoneNumber || phoneNumber.trim().length < 5) return;
@@ -127,8 +149,59 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
       return;
     }
 
+    if (searchMode === "manual") {
+      // ASSISTED MANUAL SEARCH: Zero external network transmission
+      setIsScanning(true);
+      setScanMessage("Generating assisted search dorks with zero external network transmission...");
+      try {
+        const res = await scanDiscovery(
+          parseData.e164 || phoneNumber,
+          region,
+          [],
+          [],
+          { granted: false }
+        );
+        setProviderOutcomes(res.provider_outcomes || []);
+        setTotalFound(0);
+        setScanMessage(
+          res.privacy_notice || "Privacy-first default: zero external network queries transmitted. Inspect local search dorks below."
+        );
+        onScanComplete(parseData);
+        // Automatically open the dorks modal
+        const dorkList = await getManualDorks(parseData.e164 || phoneNumber, region);
+        setDorks(dorkList);
+        setShowDorksModal(true);
+      } catch (err: any) {
+        setScanMessage(`Scan error: ${err.message}`);
+      } finally {
+        setIsScanning(false);
+      }
+    } else {
+      // AUTOMATED SEARCH: Fetch disclosure before transmitting any query
+      setLoadingDisclosure(true);
+      try {
+        const disc = await getSearchPrivacyDisclosure(parseData.e164 || phoneNumber, region);
+        setDisclosureData(disc);
+        setConsentOptIn(false);
+        setShowDisclosureModal(true);
+      } catch (err: any) {
+        alert(`Failed to fetch privacy disclosure: ${err.message}`);
+      } finally {
+        setLoadingDisclosure(false);
+      }
+    }
+  };
+
+  const handleConfirmAutomatedScan = async () => {
+    if (!parseData || !parseData.is_possible) return;
+    if (!consentOptIn) {
+      alert("Please check the explicit opt-in box to confirm transmission.");
+      return;
+    }
+
+    setShowDisclosureModal(false);
     setIsScanning(true);
-    setScanMessage("Initiating local discovery engine across authorized search providers...");
+    setScanMessage("Initiating authorized scan across selected external providers...");
 
     const activeProviders: string[] = [];
     if (providers.searxng) activeProviders.push("searxng");
@@ -143,7 +216,13 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
       .filter((u) => u.startsWith("http"));
 
     try {
-      const res = await scanDiscovery(parseData.e164 || phoneNumber, region, activeProviders, targetList);
+      const res = await scanDiscovery(
+        parseData.e164 || phoneNumber,
+        region,
+        activeProviders,
+        targetList,
+        { granted: true, confirmed_providers: activeProviders }
+      );
       setProviderOutcomes(res.provider_outcomes || []);
       setTotalFound(res.total_found);
       if (res.scan_status === "partial_failure") {
@@ -165,6 +244,12 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
     } finally {
       setIsScanning(false);
     }
+  };
+
+  const handleCancelAutomatedScan = () => {
+    setShowDisclosureModal(false);
+    setSearchMode("manual");
+    setScanMessage("External automated scan cancelled. Switched to privacy-first Assisted Manual Search (no data transmitted).");
   };
 
   const handleOpenDorks = async () => {
@@ -433,16 +518,92 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                 </details>
               </div>
 
+              {/* Privacy-First Search Mode Selector */}
+              <div className="pt-3 border-t border-[var(--border-subtle)] space-y-3">
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-bold text-[var(--text-main)] uppercase tracking-wider flex items-center gap-1.5">
+                    <ShieldCheck className="w-4 h-4 text-[var(--pixel-green)]" />
+                    <span>Discovery Search Mode</span>
+                  </label>
+                  <span className="kicker-tag text-[9px]">Privacy Invariant</span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label
+                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${
+                      searchMode === "manual"
+                        ? "border-emerald-500/60 bg-emerald-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                        : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-xs flex items-center gap-1.5 text-emerald-400">
+                        <ShieldCheck className="w-3.5 h-3.5" />
+                        Assisted Manual Search
+                      </span>
+                      <input
+                        type="radio"
+                        name="searchMode"
+                        value="manual"
+                        checked={searchMode === "manual"}
+                        onChange={() => setSearchMode("manual")}
+                        className="text-emerald-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-tight">
+                      (Default / Recommended) Generates direct browser search dorks. Zero network requests sent from backend. Complete privacy.
+                    </p>
+                  </label>
+
+                  <label
+                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${
+                      searchMode === "automated"
+                        ? "border-amber-500/60 bg-amber-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                        : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
+                    }`}
+                  >
+                    <div className="flex items-center justify-between mb-1.5">
+                      <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
+                        <Search className="w-3.5 h-3.5" />
+                        External Automated Search
+                      </span>
+                      <input
+                        type="radio"
+                        name="searchMode"
+                        value="automated"
+                        checked={searchMode === "automated"}
+                        onChange={() => setSearchMode("automated")}
+                        className="text-amber-500"
+                      />
+                    </div>
+                    <p className="text-[11px] text-[var(--text-muted)] leading-tight">
+                      Sends queries to public search engines across HTTPS. Requires explicit user disclosure and opt-in before transmission.
+                    </p>
+                  </label>
+                </div>
+              </div>
+
               {/* Scan Trigger Button */}
               <div className="pt-2 flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
-                <button
-                  type="submit"
-                  disabled={isScanning || !parseData?.is_possible}
-                  className="btn btn-primary py-2.5 px-6 font-semibold flex items-center justify-center gap-2"
-                >
-                  <Search className={`w-4 h-4 ${isScanning ? "animate-spin" : ""}`} />
-                  <span>{isScanning ? "Scanning Web & Archives..." : "Start Discovery Scan"}</span>
-                </button>
+                {searchMode === "manual" ? (
+                  <button
+                    type="submit"
+                    disabled={isScanning || !parseData?.is_possible}
+                    className="btn btn-primary py-2.5 px-6 font-semibold flex items-center justify-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white"
+                  >
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>Generate Assisted Search Dorks (Local Only)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={isScanning || !parseData?.is_possible || loadingDisclosure}
+                    className="btn btn-primary py-2.5 px-6 font-semibold flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-400 text-black border-amber-400"
+                  >
+                    <Search className={`w-4 h-4 ${isScanning || loadingDisclosure ? "animate-spin" : ""}`} />
+                    <span>{loadingDisclosure ? "Loading Disclosure..." : isScanning ? "Scanning Providers..." : "Review Disclosure & Start Automated Scan"}</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
@@ -971,6 +1132,101 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
       )}
 
       {/* Direct Search Dorks Modal */}
+      {showDisclosureModal && disclosureData && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in">
+          <div className="card max-w-2xl w-full max-h-[90vh] flex flex-col p-6 border-amber-500/40 shadow-2xl">
+            <div className="flex items-center justify-between pb-3 border-b border-[var(--border-subtle)]">
+              <div className="flex items-center gap-2 text-amber-400 font-bold text-sm">
+                <ShieldAlert className="w-5 h-5 shrink-0" />
+                <span>EXTERNAL SEARCH PRIVACY DISCLOSURE</span>
+              </div>
+              <button
+                type="button"
+                onClick={handleCancelAutomatedScan}
+                className="text-[var(--text-dim)] hover:text-[var(--text-main)] font-bold text-lg"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="py-4 space-y-4 overflow-y-auto flex-1 text-xs">
+              <div className="p-3 rounded-lg bg-amber-950/20 border border-amber-500/30 text-amber-200 text-xs leading-relaxed">
+                {disclosureData.notice}
+              </div>
+
+              <div className="space-y-1 font-mono text-[11px] text-[var(--text-muted)]">
+                <div>Target Phone Number: <span className="text-[var(--pixel-cyan)] font-bold">{parseData?.e164 || phoneNumber}</span></div>
+                <div>Masked Identity: <span className="text-[var(--text-main)] font-bold">{disclosureData.masked_phone}</span></div>
+              </div>
+
+              <div className="space-y-3">
+                <div className="font-bold text-[var(--text-main)] uppercase tracking-wider text-[11px]">
+                  Third-Party Providers That Will Receive Your Telephone Query
+                </div>
+                <div className="space-y-2">
+                  {disclosureData.providers
+                    .filter((p) => providers[p.provider_id as keyof typeof providers])
+                    .map((p) => (
+                      <div key={p.provider_id} className="p-3 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-1.5">
+                        <div className="flex items-center justify-between">
+                          <span className="font-bold text-[var(--text-main)]">{p.provider_name}</span>
+                          <span className="font-mono text-[10px] text-[var(--pixel-cyan)] truncate max-w-xs">{p.endpoint}</span>
+                        </div>
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-[11px] text-[var(--text-muted)]">
+                          <div><strong className="text-[var(--text-dim)]">Query Sent:</strong> <span className="font-mono text-emerald-400">{p.exact_query_sent}</span></div>
+                          <div><strong className="text-[var(--text-dim)]">Data Format:</strong> {p.data_transmitted}</div>
+                        </div>
+                        <div className="text-[11px] text-[var(--text-muted)]">
+                          <strong className="text-[var(--text-dim)]">Purpose:</strong> {p.purpose}
+                        </div>
+                        <div className="text-[10px] text-amber-400/90 bg-amber-950/30 p-1.5 rounded border border-amber-900/30">
+                          <strong>Privacy Risk:</strong> {p.privacy_risk}
+                        </div>
+                      </div>
+                    ))}
+                </div>
+              </div>
+
+              {/* Explicit Consent Opt-In Checkbox */}
+              <label className="flex items-start gap-2.5 p-3 rounded-lg border border-cyan-900/40 bg-[#09111e] cursor-pointer hover:border-cyan-700/60 transition-colors">
+                <input
+                  type="checkbox"
+                  checked={consentOptIn}
+                  onChange={(e) => setConsentOptIn(e.target.checked)}
+                  className="mt-0.5 rounded border-[var(--border-subtle)]"
+                />
+                <span className="text-[11px] text-[var(--text-main)] font-medium leading-relaxed">
+                  I understand that third-party search engines will process and log this telephone query in their server access logs. I explicitly authorize ClearNum to transmit this query to the selected providers.
+                </span>
+              </label>
+            </div>
+
+            <div className="pt-3 border-t border-[var(--border-subtle)] flex flex-col sm:flex-row items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={handleCancelAutomatedScan}
+                className="btn btn-secondary py-2 px-4 text-xs font-semibold w-full sm:w-auto"
+              >
+                Cancel & Keep Data Local
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmAutomatedScan}
+                disabled={!consentOptIn || isScanning}
+                className={`btn py-2 px-5 text-xs font-semibold w-full sm:w-auto flex items-center justify-center gap-2 ${
+                  consentOptIn
+                    ? "btn-primary bg-amber-500 hover:bg-amber-400 text-black border-amber-400 font-bold"
+                    : "opacity-40 cursor-not-allowed bg-slate-800 text-slate-400"
+                }`}
+              >
+                <Search className="w-3.5 h-3.5" />
+                <span>Authorize & Execute Query</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDorksModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
           <div className="card w-full max-w-3xl max-h-[85vh] flex flex-col overflow-hidden border-[var(--border-subtle)] shadow-2xl">

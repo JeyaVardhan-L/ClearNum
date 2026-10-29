@@ -82,6 +82,7 @@ async def test_e2e_discovery_pipeline_full_lifecycle():
             "default_region": "US",
             "providers": ["duckduckgo", "searxng", "wikimedia", "hackernews", "wayback"],
             "target_urls": [],
+            "external_search_consent": True,
         }
 
         resp = client.post("/api/discovery/scan", json=payload)
@@ -179,6 +180,7 @@ def test_e2e_discovery_partial_failure():
             "default_region": "US",
             "providers": ["duckduckgo", "wikimedia"],
             "target_urls": [],
+            "external_search_consent": True,
         }
 
         resp = client.post("/api/discovery/scan", json=payload)
@@ -258,3 +260,62 @@ def test_e2e_discovery_custom_target_ssrf_and_matching():
         assert data["total_found"] == 1
         assert "valid-classifieds.example.org" in data["exposures"][0]["url"]
         assert data["exposures"][0]["match_type"] in ("EXACT", "PROBABLE")
+
+
+def test_e2e_discovery_consent_denied_default():
+    """Verifies privacy-first default: when no consent is provided,
+    external search providers are NOT queried, no network traffic is sent,
+    and manual search dorks are provided for local browser inspection."""
+    synthetic_phone = "+14155552671"
+
+    with patch("backend.app.engines.discovery.providers.duckduckgo.DuckDuckGoProvider.search", new_callable=AsyncMock) as mock_ddg, \
+         patch("backend.app.engines.discovery.providers.searxng.SearXNGProvider.search", new_callable=AsyncMock) as mock_searx:
+
+        # No consent provided (default)
+        payload = {
+            "phone_number": synthetic_phone,
+            "default_region": "US",
+            "providers": ["duckduckgo", "searxng"],
+            "target_urls": [],
+        }
+
+        resp = client.post("/api/discovery/scan", json=payload)
+        assert resp.status_code == 200
+        data = resp.json()
+
+        # Invariant: external search engines were never called
+        mock_ddg.assert_not_called()
+        mock_searx.assert_not_called()
+
+        assert data["consent_granted"] is False
+        assert data["external_search_conducted"] is False
+        assert data["total_found"] == 0
+        assert data["manual_dorks_count"] > 0
+        assert "Privacy-first default" in data["privacy_notice"]
+
+        # Provider outcomes indicate skipped due to consent
+        for outcome in data["provider_outcomes"]:
+            assert "consent" in outcome["diagnostic"].lower()
+
+
+def test_e2e_discovery_disclosure_endpoint():
+    """Verifies the transparency disclosure endpoint exposes which providers receive queries,
+    exact sent queries, data transmission method, purpose, and privacy risks."""
+    resp = client.get("/api/discovery/disclosure?phone_number=+919876543210&default_region=IN")
+    assert resp.status_code == 200
+    data = resp.json()
+
+    assert data["default_mode"] == "ASSISTED_MANUAL_SEARCH"
+    assert "Privacy Notice" in data["notice"]
+    assert len(data["providers"]) == 5
+
+    providers = {p["provider_id"]: p for p in data["providers"]}
+    assert "duckduckgo" in providers
+    assert "searxng" in providers
+    assert "wayback" in providers
+
+    ddg = providers["duckduckgo"]
+    assert '"+919876543210"' in ddg["exact_query_sent"] or '"+91 98765 43210"' in ddg["exact_query_sent"]
+    assert "•" in ddg["masked_query_preview"]
+    assert ddg["endpoint"] == "https://html.duckduckgo.com/html/"
+    assert "web access logs" in ddg["privacy_risk"].lower()
