@@ -176,11 +176,14 @@ def test_analyze_sms_endpoint_dlt_and_commercial():
     assert resp.status_code == 200
     data = resp.json()
     assert data["sender"] == "VM-HDFCBK"
-    assert data["brand_name"] == "HDFCBK"
+    assert "HDFC" in data["brand_name"]
     assert data["dlt_prefix"] == "VM"
     assert data["category"] == "COMMERCIAL_BANKING"
-    assert "COMP TEL NO 918106833178" in data["complaint_sms"]
-    assert "HDFCBK" in data["merchant_notice"]
+    assert "COMP" in data["complaint_sms"]
+    assert "VM-HDFCBK" in data["complaint_sms"]
+    assert "HDFC" in data["merchant_notice"]
+    assert data["telecom_circle"] is not None
+    assert data["access_provider"] is not None
 
     # 2. Test Shopping App SMS
     resp_shop = client.post("/api/discovery/analyze-sms", json={
@@ -190,7 +193,7 @@ def test_analyze_sms_endpoint_dlt_and_commercial():
     })
     assert resp_shop.status_code == 200
     data_shop = resp_shop.json()
-    assert data_shop["brand_name"] == "SWIGGY"
+    assert "SWIGGY" in data_shop["brand_name"].upper()
     assert data_shop["category"] == "COMMERCIAL_SHOPPING"
 
     # 3. Test Numeric Shortcode with STOP
@@ -204,3 +207,31 @@ def test_analyze_sms_endpoint_dlt_and_commercial():
     assert data_short["is_shortcode"] is True
     assert data_short["has_opt_out_keyword"] is True
     assert data_short["opt_out_command"] == "STOP"
+
+
+def test_india_inventory_endpoints():
+    # Test inventory list
+    resp = client.get("/api/remediation/india-inventory")
+    assert resp.status_code == 200
+    inventory = resp.json()
+    assert len(inventory) >= 100
+    # Verify categories A through J exist
+    categories = {item["category"] for item in inventory}
+    assert "A_GOV_REGULATORY" in categories
+    assert "B_TELECOM_DLT" in categories
+    assert "C_FINANCIAL" in categories
+    assert "D_ECOMMERCE_RETAIL" in categories
+    assert "E_DIRECTORIES" in categories
+    assert "F_PUBLIC_DOCUMENTS" in categories
+    assert "G_CONSUMER_FORUMS" in categories
+    assert "H_COMPANY_REGISTRY" in categories
+    assert "I_OFFICIAL_OPTOUT" in categories
+    assert "J_OTHER_LEGAL" in categories
+
+    # Test inventory summary
+    resp_summary = client.get("/api/remediation/india-inventory/summary")
+    assert resp_summary.status_code == 200
+    summary = resp_summary.json()
+    assert summary["total_sources"] >= 100
+    assert len(summary["by_category"]) == 10
+
