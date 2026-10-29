@@ -166,3 +166,25 @@ def test_purge_api_status_and_execution_guard():
     success_resp = client.post("/api/privacy/purge", json={"confirm": True, "confirmation_code": "PURGE"})
     assert success_resp.status_code == 200
     assert success_resp.json()["success"] is True
+
+
+def test_purge_cli_guard(tmp_path: Path, monkeypatch):
+    from typer.testing import CliRunner
+    from backend.app.cli.main import app as cli_app
+
+    runner = CliRunner()
+    db_file = tmp_path / "cli_test.db"
+    key_file = tmp_path / ".cli_key"
+    monkeypatch.setattr(settings, "db_path", db_file)
+    monkeypatch.setattr(settings, "key_path", key_file)
+    init_db(db_file)
+
+    # 1. Purge with wrong code aborts
+    result = runner.invoke(cli_app, ["purge", "--yes", "--code", "WRONG"])
+    assert result.exit_code == 0
+    assert "aborted" in result.stdout.lower()
+
+    # 2. Purge with valid code PURGE succeeds
+    result2 = runner.invoke(cli_app, ["purge", "--yes", "--code", "PURGE"])
+    assert result2.exit_code == 0
+    assert "complete" in result2.stdout.lower()

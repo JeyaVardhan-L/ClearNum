@@ -193,10 +193,27 @@ def demo():
 
 
 @app.command()
-def purge():
-    """Cryptographically purges all local databases, exposure records, and HMAC keys."""
-    purge_all_data()
-    console.print("[bold green]Total cryptographic purge complete. All databases and secret keys zero-wiped and reset.[/bold green]")
+def purge(
+    yes: bool = typer.Option(False, "--yes", "-y", help="Skip interactive confirmation (requires --code PURGE)"),
+    code: str = typer.Option("", "--code", help="Confirmation code (must be 'PURGE')"),
+):
+    """Safely purges all local databases, exposure records, and HMAC keys."""
+    from backend.app.core.database import get_purge_impact
+    impact = get_purge_impact()
+    console.print(f"[bold yellow]Purge Target Database:[/bold yellow] {impact['database_path']}")
+    console.print(f"[bold yellow]Total Stored Records:[/bold yellow] {impact['total_records']}")
+    if impact.get("is_default_database"):
+        console.print("[bold red]WARNING: This will delete your primary local ClearNum database.[/bold red]")
+
+    confirmation = code
+    if not yes:
+        confirmation = typer.prompt("To permanently delete all records, type PURGE")
+
+    res = purge_all_data(confirmed=True, confirmation_code=confirmation)
+    if res["success"]:
+        console.print(f"[bold green]{res['message']}[/bold green]")
+    else:
+        console.print(f"[bold red]Purge aborted: {res['message']}[/bold red]")
 
 
 @app.command()
