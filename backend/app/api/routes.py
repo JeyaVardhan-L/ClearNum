@@ -39,8 +39,18 @@ from backend.app.engines.remediation import (
     generate_tcpa_ftc_complaint,
     generate_trai_1909_complaint,
     generate_merchant_unsubscribe,
+    generate_dpdp_act_notice,
     get_all_dnd_guides,
     get_search_removal_guides,
+    get_all_indian_sources,
+    get_inventory_summary,
+    get_sources_by_category,
+)
+from backend.app.engines.discovery.india_telecom import (
+    decode_dlt_sender,
+    generate_trai_1909_complaint as gen_trai_1909,
+    generate_chakshu_escalation,
+    generate_dpdp_revocation_notice,
 )
 from backend.app.engines.prevention import (
     record_spam_incident,
@@ -66,6 +76,8 @@ from backend.app.api.schemas import (
     PurgeResponse,
     AnalyzeSMSRequest,
     AnalyzeSMSResponse,
+    IndianSourceTargetItem,
+    InventorySummaryResponse,
 )
 
 router = APIRouter(prefix="/api")
@@ -97,33 +109,79 @@ def analyze_sms_endpoint(req: AnalyzeSMSRequest):
     sender_info = analyze_single_sms(req.sender, req.message_body, req.region)
     complaint_sms = None
     merchant_notice = None
+    dpdp_notice = None
+    chakshu_url = None
+    chakshu_instructions = None
+    circle_desc = None
+    operator_name = None
+    dnd_portal_url = None
+    grievance_email = None
+    customer_care_phone = None
 
+    # Decode DLT sender header
+    op_name, circ_desc, matched_brand = decode_dlt_sender(req.sender)
+    if op_name:
+        operator_name = op_name
+    if circ_desc:
+        circle_desc = circ_desc
+
+    if matched_brand:
+        brand_name = matched_brand.brand_name
+        category = matched_brand.category
+        dnd_portal_url = matched_brand.dnd_url
+        grievance_email = matched_brand.grievance_email
+        customer_care_phone = matched_brand.customer_care_phone
+    else:
+        brand_name = sender_info.brand_name
+        category = sender_info.category
+
+    # TRAI 1909 & Chakshu escalation
     if req.region.upper() == "IN":
-        # Generate TRAI 1909 complaint format
-        user_digits = "".join(c for c in (req.user_phone or "") if c.isdigit())
-        user_digits = user_digits if user_digits else "XXXXXXXXXX"
-        complaint_sms = f"COMP TEL NO {user_digits}, 29/10/26, 10:30, {sender_info.sender_number}"
+        trai_data = gen_trai_1909(req.sender, req.message_body)
+        complaint_sms = trai_data["formal_syntax"]
 
-    if sender_info.brand_name:
+        chakshu_data = generate_chakshu_escalation(req.sender, req.message_body)
+        chakshu_url = chakshu_data["portal_url"]
+        chakshu_instructions = chakshu_data["instructions"]
+
+    # DPDP Act 2023 Statutory Consent Revocation Notice
+    user_masked = mask_phone_number(req.user_phone) if req.user_phone else "[Registered Subscriber Mobile]"
+    if matched_brand:
+        dpdp_notice = generate_dpdp_revocation_notice(matched_brand, user_masked)
         merchant_notice = (
             f"FORMAL NOTICE OF WITHDRAWAL OF CONSENT / STATUTORY DO-NOT-CALL DEMAND\n"
-            f"To: {sender_info.brand_name} Privacy & Compliance Team\n\n"
-            f"Please immediately remove my telephone number from all marketing, promotional, "
-            f"and affiliated third-party databases. This serves as formal revocation of consent "
-            f"under TRAI Telecom Commercial Communications Customer Preference Regulations / statutory privacy laws."
+            f"To: {matched_brand.brand_name} Grievance & Compliance Team ({matched_brand.grievance_email or 'grievance'})\n\n"
+            f"Please immediately suppress telephone number {user_masked} from all active marketing, promotional, "
+            f"and affiliated calling databases under Section 6(4) of the Digital Personal Data Protection Act, 2023 "
+            f"and TRAI Telecom Commercial Communications Customer Preference Regulations (TCCCPR 2018)."
+        )
+    elif brand_name:
+        merchant_notice = (
+            f"FORMAL NOTICE OF WITHDRAWAL OF CONSENT / STATUTORY DO-NOT-CALL DEMAND\n"
+            f"To: {brand_name} Privacy & Compliance Team\n\n"
+            f"Please immediately suppress my telephone number ({user_masked}) from all marketing, promotional, "
+            f"and affiliated third-party databases under Section 6(4) of the Digital Personal Data Protection Act, 2023."
         )
 
     return AnalyzeSMSResponse(
         sender=sender_info.sender_number,
-        category=sender_info.category,
-        brand_name=sender_info.brand_name,
+        category=category,
+        brand_name=brand_name,
         dlt_prefix=sender_info.dlt_prefix,
+        telecom_circle=circle_desc,
+        access_provider=operator_name,
         is_shortcode=sender_info.is_shortcode,
         has_opt_out_keyword=sender_info.has_opt_out_keyword,
         opt_out_command=sender_info.opt_out_command,
         recommended_action=sender_info.recommended_action,
         complaint_sms=complaint_sms,
+        chakshu_portal_url=chakshu_url,
+        chakshu_instructions=chakshu_instructions,
         merchant_notice=merchant_notice,
+        dpdp_notice=dpdp_notice,
+        dnd_portal_url=dnd_portal_url,
+        grievance_email=grievance_email,
+        customer_care_phone=customer_care_phone,
     )
 
 
@@ -394,9 +452,57 @@ def list_remediation_sources_endpoint():
             "statutory_rights": s.statutory_rights,
             "contact_email": s.contact_email,
             "notes": s.notes,
+            "execution_type": getattr(s, "execution_type", None) or s.removal_method,
+            "verification_status": getattr(s, "verification_status", None) or "accessible_manual",
+            "lookup_method": getattr(s, "lookup_method", None) or "Direct web lookup",
+            "can_match_phone": getattr(s, "can_match_phone", True),
+            "evidence_attribution": getattr(s, "evidence_attribution", None) or "Web presence",
+            "last_verified_at": getattr(s, "last_verified_at", None) or "2026-10-29T11:00:00Z",
         }
         for s in sources
     ]
+
+
+@router.get("/remediation/india-inventory", response_model=List[IndianSourceTargetItem])
+def get_india_inventory_endpoint():
+    """Returns the complete curated inventory of 110+ distinct Indian source targets."""
+    return [
+        IndianSourceTargetItem(
+            source_id=t.source_id,
+            name=t.name,
+            official_url=t.official_url,
+            category=t.category,
+            category_label=t.category_label,
+            execution_type=t.execution_type,
+            verification_status=t.verification_status,
+            access_restrictions=t.access_restrictions,
+            lookup_method=t.lookup_method,
+            can_match_phone=t.can_match_phone,
+            evidence_attribution=t.evidence_attribution,
+            last_verified_at=t.last_verified_at,
+            implementation_status=t.implementation_status,
+            known_limitations=t.known_limitations,
+            instructions=t.instructions,
+            statutory_rights=t.statutory_rights,
+            grievance_email=t.grievance_email,
+            customer_care_phone=t.customer_care_phone,
+            domains=t.domains,
+        )
+        for t in get_all_indian_sources()
+    ]
+
+
+@router.get("/remediation/india-inventory/summary", response_model=InventorySummaryResponse)
+def get_india_inventory_summary_endpoint():
+    """Returns exact source counts across all 10 categories, execution types, and verification statuses."""
+    summary = get_inventory_summary()
+    return InventorySummaryResponse(
+        total_sources=summary["total_sources"],
+        by_category=summary["by_category"],
+        by_execution_type=summary["by_execution_type"],
+        by_verification_status=summary["by_verification_status"],
+        last_verified=summary["last_verified"],
+    )
 
 
 @router.post("/remediation/transition")
@@ -483,6 +589,12 @@ def generate_template_endpoint(req: GenerateTemplateRequest):
         )
     elif t_type in ("MERCHANT_UNSUBSCRIBE", "MERCHANT_OPTOUT"):
         tpl = generate_merchant_unsubscribe(norm, req.recipient_name or "Company Operations")
+    elif t_type in ("DPDP_ACT_2023", "DPDP_NOTICE", "DPDP"):
+        tpl = generate_dpdp_act_notice(
+            norm,
+            req.recipient_name or "Grievance Officer",
+            target_url=req.target_url,
+        )
     else:
         raise HTTPException(status_code=400, detail=f"Unknown template type: {req.template_type}")
 

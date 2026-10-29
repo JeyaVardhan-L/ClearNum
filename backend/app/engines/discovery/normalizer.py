@@ -1,7 +1,6 @@
 """Country-aware phone number parser and normalization engine.
-Uses Google's libphonenumber (via phonenumbers) to generate standardized
-representations, identify carrier metadata, line types, and controlled,
-deduplicated query permutations.
+India-first design: defaults to India (+91) with robust support for domestic 10-digit formats,
+5+5 mobile splits, leading zero national variants, and DoT telecom circle detection.
 """
 
 from dataclasses import dataclass, field
@@ -54,14 +53,15 @@ LINE_TYPE_MAP = {
 
 def parse_and_normalize(
     raw_phone: str,
-    default_region: Optional[str] = "US",
+    default_region: Optional[str] = "IN",
     max_permutations: int = 8,
 ) -> NormalizedPhone:
     """Parses and normalizes a phone number into international, national,
     and formatted variants without making any network requests.
 
-    Requires sufficient region context for numbers lacking an international '+' prefix.
-    Never silently assumes a US format for an un-prefixed number when region context is missing.
+    Defaults to India ('IN' / +91).
+    Requires explicit region context for numbers lacking an international '+' prefix.
+    When default_region is None and no '+' prefix is provided, marks the number as AMBIGUOUS.
     """
     raw_clean = raw_phone.strip()
     hmac_id = compute_phone_hmac(raw_clean)
@@ -134,7 +134,13 @@ def parse_and_normalize(
     canonical_digits = f"{parsed_obj.country_code}{national_digits}"
 
     # Generate standardized punctuation variants
-    if len(national_digits) == 10:
+    if parsed_obj.country_code == 91 and len(national_digits) == 10:
+        # Standard Indian 5+5 mobile split: 98765 43210
+        dashed = f"{national_digits[:5]}-{national_digits[5:]}"
+        dotted = f"{national_digits[:5]}.{national_digits[5:]}"
+        spaced = f"{national_digits[:5]} {national_digits[5:]}"
+        parenthesized = f"({national_digits[:5]}) {national_digits[5:]}"
+    elif len(national_digits) == 10:
         dashed = f"{national_digits[:3]}-{national_digits[3:6]}-{national_digits[6:]}"
         dotted = f"{national_digits[:3]}.{national_digits[3:6]}.{national_digits[6:]}"
         spaced = f"{national_digits[:3]} {national_digits[3:6]} {national_digits[6:]}"
@@ -163,16 +169,28 @@ def parse_and_normalize(
     canonical_masked = mask_phone_number(e164 or raw_clean)
 
     # Generate controlled, deduplicated query permutations for search discovery
-    raw_candidates = [
-        f'"{e164}"',
-        f'"{national}"',
-        f'"{dashed}"',
-        f'"{parenthesized}"',
-        f'"{spaced}"',
-        f'"{dotted}"',
-        f'"{international}"',
-        f'"{canonical_digits}"',
-    ]
+    if country_code == 91 and len(national_digits) == 10:
+        raw_candidates = [
+            f'"{e164}"',
+            f'"{national_digits}"',
+            f'"{spaced}"',
+            f'"{dashed}"',
+            f'"0{national_digits}"',
+            f'"{national}"',
+            f'"{international}"',
+            f'"{canonical_digits}"',
+        ]
+    else:
+        raw_candidates = [
+            f'"{e164}"',
+            f'"{national}"',
+            f'"{dashed}"',
+            f'"{parenthesized}"',
+            f'"{spaced}"',
+            f'"{dotted}"',
+            f'"{international}"',
+            f'"{canonical_digits}"',
+        ]
 
     # Deduplicate while preserving rank order
     deduped_queries = []
@@ -185,7 +203,10 @@ def parse_and_normalize(
 
     # Add bounded contextual dork
     if e164:
-        contextual_dork = f'"{e164}" (site:pastebin.com OR site:github.com)'
+        if country_code == 91:
+            contextual_dork = f'"{e164}" (site:justdial.com OR site:indiamart.com OR site:zaubacorp.com)'
+        else:
+            contextual_dork = f'"{e164}" (site:pastebin.com OR site:github.com)'
         if contextual_dork not in seen:
             deduped_queries.append(contextual_dork)
 
