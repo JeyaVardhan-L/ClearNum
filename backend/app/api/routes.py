@@ -11,6 +11,7 @@ from backend.app.core.config import settings
 from backend.app.core.database import get_db_connection, init_db, purge_all_data, utc_now_iso, get_purge_impact
 from backend.app.core.security import compute_phone_hmac, mask_phone_number
 from backend.app.core.canonical_url import canonicalize_url
+from backend.app.core.redactor import redact_text
 from backend.app.core.ssrf import safe_fetch_url
 from backend.app.engines.discovery import parse_and_normalize, match_phone_in_text
 from backend.app.engines.discovery.matcher import format_evidence_requirement, EXAMPLE_PATTERN
@@ -33,6 +34,7 @@ from backend.app.engines.remediation import (
     lookup_source_by_url,
     get_all_sources,
     validate_transition,
+    normalize_state,
     ActionState,
     InvalidStateTransitionError,
     EVIDENCE_RULES,
@@ -73,6 +75,8 @@ from backend.app.api.schemas import (
     ProviderOutcomeItem,
     ManualDorkItem,
     TransitionActionRequest,
+    AuditEventItem,
+    RemediationHistoryResponse,
     GenerateTemplateRequest,
     GenerateTemplateResponse,
     RescanVerificationRequest,
@@ -811,9 +815,11 @@ def transition_action_endpoint(req: TransitionActionRequest):
     conn = get_db_connection()
     cursor = conn.cursor()
 
-    # Get current status
+    # Get current status and existing metadata
     cursor.execute("""
-        SELECT id, status FROM remediation_actions
+        SELECT id, status, request_type, submission_channel, submitted_at,
+               expected_response_date, follow_up_date, deadline_basis
+        FROM remediation_actions
         WHERE exposure_id = ? AND identity_hmac = ?
     """, (req.exposure_id, req.identity_hmac))
     row = cursor.fetchone()
@@ -831,19 +837,73 @@ def transition_action_endpoint(req: TransitionActionRequest):
         conn.close()
         raise HTTPException(status_code=400, detail=str(e))
 
+    canonical_next = normalize_state(req.next_state).value
+
+    # Validate deadline_basis if supplied
+    deadline_basis = (req.deadline_basis or "NONE").upper().strip()
+    if deadline_basis not in ("STATUTORY", "SOURCE_ESTIMATE", "USER_DEFINED", "NONE"):
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid deadline_basis. Must be one of: STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, NONE"
+        )
+
     now_iso = utc_now_iso()
+
+    # Enforce submission semantics
+    new_submitted_at = row["submitted_at"]
+    if canonical_next == "REQUEST_PREPARED":
+        # Draft prepared locally; submitted_at MUST NOT be set
+        new_submitted_at = None
+    elif canonical_next == "SUBMITTED":
+        # User affirms external submission dispatched
+        new_submitted_at = req.submitted_at or now_iso
+    elif req.submitted_at is not None:
+        new_submitted_at = req.submitted_at
+
+    new_request_type = req.request_type if req.request_type is not None else row["request_type"]
+    new_submission_channel = req.submission_channel if req.submission_channel is not None else row["submission_channel"]
+    new_expected_response_date = req.expected_response_date if req.expected_response_date is not None else row["expected_response_date"]
+    new_follow_up_date = req.follow_up_date if req.follow_up_date is not None else row["follow_up_date"]
+    new_deadline_basis = deadline_basis if req.deadline_basis is not None else (row["deadline_basis"] or "NONE")
+
+    clean_notes = redact_text(req.notes) if req.notes else None
+    clean_ref = redact_text(req.submission_ref) if req.submission_ref else None
+
     cursor.execute("""
         UPDATE remediation_actions
-        SET status = ?, submission_ref = COALESCE(?, submission_ref),
-            notes = COALESCE(?, notes), updated_at = ?
+        SET status = ?,
+            submission_ref = COALESCE(?, submission_ref),
+            notes = COALESCE(?, notes),
+            submitted_at = ?,
+            request_type = ?,
+            submission_channel = ?,
+            expected_response_date = ?,
+            follow_up_date = ?,
+            deadline_basis = ?,
+            updated_at = ?
         WHERE id = ?
-    """, (req.next_state, req.submission_ref, req.notes, now_iso, action_id))
+    """, (
+        canonical_next,
+        clean_ref,
+        clean_notes,
+        new_submitted_at,
+        new_request_type,
+        new_submission_channel,
+        new_expected_response_date,
+        new_follow_up_date,
+        new_deadline_basis,
+        now_iso,
+        action_id,
+    ))
 
     # Log immutable state transition into action_audit_log
     audit_id = str(uuid.uuid4())
-    evidence_rule = EVIDENCE_RULES.get(req.next_state)
+    evidence_rule = EVIDENCE_RULES.get(canonical_next)
     ev_type = evidence_rule.required_evidence_type if evidence_rule else "USER_TRANSITION"
-    ev_notes = req.notes or (f"Submission reference: {req.submission_ref}" if req.submission_ref else "User initiated transition")
+    ev_notes = clean_notes or (f"Submission reference: {clean_ref}" if clean_ref else "User initiated transition")
+    safe_ev_notes = redact_text(ev_notes)
+
     cursor.execute("""
         INSERT INTO action_audit_log (
             id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at
@@ -853,16 +913,108 @@ def transition_action_endpoint(req: TransitionActionRequest):
         action_id,
         req.identity_hmac,
         current_status,
-        req.next_state,
+        canonical_next,
         ev_type,
-        ev_notes,
+        safe_ev_notes,
         now_iso,
     ))
 
     conn.commit()
     conn.close()
 
-    return {"success": True, "action_id": action_id, "new_status": req.next_state, "updated_at": now_iso}
+    return {
+        "success": True,
+        "action_id": action_id,
+        "new_status": canonical_next,
+        "updated_at": now_iso,
+        "request_type": new_request_type,
+        "submission_channel": new_submission_channel,
+        "submitted_at": new_submitted_at,
+        "expected_response_date": new_expected_response_date,
+        "follow_up_date": new_follow_up_date,
+        "deadline_basis": new_deadline_basis,
+    }
+
+
+@router.get("/remediation/history/{exposure_id}", response_model=RemediationHistoryResponse)
+def get_remediation_history_endpoint(
+    exposure_id: str,
+    identity_hmac: str = Query(..., description="Keyed identity HMAC for authorization")
+):
+    """Returns chronological audit trail and request metadata for an exposure under strict identity isolation."""
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # Verify exposure exists and belongs to requesting identity
+    cursor.execute("SELECT id, identity_hmac FROM exposures WHERE id = ?", (exposure_id,))
+    exp_row = cursor.fetchone()
+    if not exp_row or exp_row["identity_hmac"] != identity_hmac:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Exposure not found.")
+
+    cursor.execute("""
+        SELECT id, source_id, status, request_type, submission_channel, submitted_at,
+               expected_response_date, follow_up_date, deadline_basis
+        FROM remediation_actions
+        WHERE exposure_id = ? AND identity_hmac = ?
+    """, (exposure_id, identity_hmac))
+    act_row = cursor.fetchone()
+
+    if not act_row:
+        conn.close()
+        return RemediationHistoryResponse(
+            exposure_id=exposure_id,
+            action_id=None,
+            source_id=None,
+            current_status=None,
+            request_type=None,
+            submission_channel=None,
+            submitted_at=None,
+            expected_response_date=None,
+            follow_up_date=None,
+            deadline_basis="NONE",
+            total_events=0,
+            events=[],
+        )
+
+    action_id = act_row["id"]
+
+    cursor.execute("""
+        SELECT id, action_id, from_state, to_state, evidence_type, evidence_notes, created_at
+        FROM action_audit_log
+        WHERE action_id = ? AND identity_hmac = ?
+        ORDER BY created_at ASC
+    """, (action_id, identity_hmac))
+    audit_rows = cursor.fetchall()
+    conn.close()
+
+    events = [
+        AuditEventItem(
+            id=row["id"],
+            action_id=row["action_id"],
+            from_state=row["from_state"],
+            to_state=row["to_state"],
+            evidence_type=row["evidence_type"],
+            evidence_notes=redact_text(row["evidence_notes"] or "") if row["evidence_notes"] else None,
+            created_at=row["created_at"],
+        )
+        for row in audit_rows
+    ]
+
+    return RemediationHistoryResponse(
+        exposure_id=exposure_id,
+        action_id=act_row["id"],
+        source_id=act_row["source_id"],
+        current_status=act_row["status"],
+        request_type=act_row["request_type"],
+        submission_channel=act_row["submission_channel"],
+        submitted_at=act_row["submitted_at"],
+        expected_response_date=act_row["expected_response_date"],
+        follow_up_date=act_row["follow_up_date"],
+        deadline_basis=act_row["deadline_basis"] or "NONE",
+        total_events=len(events),
+        events=events,
+    )
 
 
 @router.post("/remediation/template", response_model=GenerateTemplateResponse)

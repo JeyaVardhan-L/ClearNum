@@ -50,6 +50,14 @@ LEGACY_STATE_MAPPINGS: Dict[str, ActionState] = {
     "UNABLE_TO_VERIFY": ActionState.INACCESSIBLE_OR_INCONCLUSIVE,
     "FAILED": ActionState.STILL_VISIBLE,
     "MANUAL_ACTION_REQUIRED": ActionState.AWAITING_USER_APPROVAL,
+    "REQUEST_SUBMITTED": ActionState.SUBMITTED,
+    "REMEDIATION_AVAILABLE": ActionState.AWAITING_USER_APPROVAL,
+    "AWAITING_RESPONSE": ActionState.ACKNOWLEDGED,
+    "REMOVAL_VERIFIED": ActionState.NO_LONGER_VISIBLE_AT_CHECKED_URL,
+    "REMOVAL_CLAIMED": ActionState.SOURCE_CONFIRMED_REMOVAL,
+    "REMOVAL_FAILED": ActionState.STILL_VISIBLE,
+    "INACCESSIBLE": ActionState.INACCESSIBLE_OR_INCONCLUSIVE,
+    "INCONCLUSIVE": ActionState.INACCESSIBLE_OR_INCONCLUSIVE,
 }
 
 
@@ -187,6 +195,36 @@ class StateEvidenceCriteria:
 
 
 EVIDENCE_RULES: Dict[ActionState, StateEvidenceCriteria] = {
+    ActionState.DISCOVERED: StateEvidenceCriteria(
+        required_evidence_type="DISCOVERY_INDEXING",
+        description="Candidate exposure identified during search or provider scan.",
+        can_be_automated=True,
+    ),
+    ActionState.AWAITING_USER_REVIEW: StateEvidenceCriteria(
+        required_evidence_type="SYSTEM_EVALUATION",
+        description="Candidate exposure flagged for user manual review.",
+        can_be_automated=True,
+    ),
+    ActionState.AWAITING_USER_APPROVAL: StateEvidenceCriteria(
+        required_evidence_type="SYSTEM_EVALUATION",
+        description="Remediation pathway identified and queued for user action.",
+        can_be_automated=True,
+    ),
+    ActionState.REQUEST_PREPARED: StateEvidenceCriteria(
+        required_evidence_type="DRAFT_GENERATION",
+        description="Notice draft or opt-out instructions assembled locally; unsubmitted.",
+        can_be_automated=True,
+    ),
+    ActionState.AWAITING_VERIFICATION: StateEvidenceCriteria(
+        required_evidence_type="COOLDOWN_OR_TIMER",
+        description="Opt-out submitted; waiting for broker processing window before automated verification.",
+        can_be_automated=True,
+    ),
+    ActionState.REJECTED: StateEvidenceCriteria(
+        required_evidence_type="USER_DISMISSAL",
+        description="User marked exposure or action as invalid, false-positive, or ignored.",
+        can_be_automated=False,
+    ),
     ActionState.CONFIRMED_EXPOSURE: StateEvidenceCriteria(
         required_evidence_type="USER_OR_SCAN_CONFIRMATION",
         description="User affirms the exposed listing contains their personal telephone number.",

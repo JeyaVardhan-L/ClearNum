@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from typing import Optional
 from backend.app.core.ssrf import safe_fetch_url, SSRFValidationError
 from backend.app.core.database import get_db_connection, utc_now_iso
+from backend.app.core.redactor import redact_text
 from backend.app.engines.discovery.normalizer import NormalizedPhone
 from backend.app.engines.discovery.matcher import match_phone_in_text
 
@@ -200,7 +201,7 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
             current_status,
             new_status,
             "HTTP_LIVE_VERIFICATION",
-            outcome.evidence_notes,
+            redact_text(outcome.evidence_notes),
             outcome.verified_at,
         ))
 

@@ -44,9 +44,9 @@ class PhoneRedactingFilter(logging.Filter):
             record.msg = redact_text(record.msg)
         if record.args:
             if isinstance(record.args, dict):
-                record.args = {k: redact_text(str(v)) for k, v in record.args.items()}
+                record.args = {k: (redact_text(v) if isinstance(v, str) else v) for k, v in record.args.items()}
             elif isinstance(record.args, (list, tuple)):
-                record.args = tuple(redact_text(str(a)) for a in record.args)
+                record.args = tuple(redact_text(a) if isinstance(a, str) else a for a in record.args)
         return True
 
 

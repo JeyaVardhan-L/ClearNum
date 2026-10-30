@@ -121,6 +121,37 @@ class TransitionActionRequest(BaseModel):
     next_state: str  # "VERIFIED", "SUBMITTED", "ACKNOWLEDGED", "REJECTED", "VERIFIED_REMOVED", etc.
     submission_ref: Optional[str] = None
     notes: Optional[str] = None
+    request_type: Optional[str] = Field(default=None, description="Legal basis or format of remediation notice (e.g. CCPA_DELETE, GDPR_ERASURE, DPDP_NOTICE, WEB_FORM)")
+    submission_channel: Optional[str] = Field(default=None, description="Channel used for submission (e.g. WEB_FORM, STATUTORY_EMAIL, POSTAL_MAIL, TELECOM_SMS)")
+    submitted_at: Optional[str] = Field(default=None, description="ISO timestamp when notice was confirmed dispatched to source")
+    expected_response_date: Optional[str] = Field(default=None, description="ISO date when source is expected or required to resolve request")
+    follow_up_date: Optional[str] = Field(default=None, description="ISO date when user should inspect or follow up on request")
+    deadline_basis: Optional[str] = Field(default="NONE", description="Basis of deadline: STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, or NONE")
+
+
+class AuditEventItem(BaseModel):
+    id: str
+    action_id: str
+    from_state: str
+    to_state: str
+    evidence_type: str
+    evidence_notes: Optional[str] = None
+    created_at: str
+
+
+class RemediationHistoryResponse(BaseModel):
+    exposure_id: str
+    action_id: Optional[str] = None
+    source_id: Optional[str] = None
+    current_status: Optional[str] = None
+    request_type: Optional[str] = None
+    submission_channel: Optional[str] = None
+    submitted_at: Optional[str] = None
+    expected_response_date: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    deadline_basis: Optional[str] = "NONE"
+    total_events: int
+    events: List[AuditEventItem] = Field(default_factory=list)
 
 
 class GenerateTemplateRequest(BaseModel):

@@ -85,6 +85,11 @@ def init_db(db_path: Optional[Path] = None) -> None:
         submitted_at TEXT,
         verified_at TEXT,
         updated_at TEXT NOT NULL,
+        request_type TEXT,
+        submission_channel TEXT,
+        expected_response_date TEXT,
+        follow_up_date TEXT,
+        deadline_basis TEXT DEFAULT 'NONE',
         FOREIGN KEY(exposure_id) REFERENCES exposures(id) ON DELETE CASCADE,
         FOREIGN KEY(identity_hmac) REFERENCES identities(hmac_id) ON DELETE CASCADE
     );
@@ -165,6 +170,28 @@ def init_db(db_path: Optional[Path] = None) -> None:
 
     try:
         cursor.execute("UPDATE exposures SET evidence_origin = 'UNKNOWN' WHERE evidence_origin IS NULL;")
+    except Exception:
+        pass
+
+    # Ensure backward-compatible additive columns exist on remediation_actions
+    try:
+        cursor.execute("PRAGMA table_info(remediation_actions);")
+        existing_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in cursor.fetchall()}
+        new_columns = [
+            ("request_type", "TEXT"),
+            ("submission_channel", "TEXT"),
+            ("expected_response_date", "TEXT"),
+            ("follow_up_date", "TEXT"),
+            ("deadline_basis", "TEXT DEFAULT 'NONE'"),
+        ]
+        for col_name, col_def in new_columns:
+            if col_name not in existing_cols:
+                cursor.execute(f"ALTER TABLE remediation_actions ADD COLUMN {col_name} {col_def};")
+    except Exception:
+        pass
+
+    try:
+        cursor.execute("UPDATE remediation_actions SET deadline_basis = 'NONE' WHERE deadline_basis IS NULL;")
     except Exception:
         pass
 
