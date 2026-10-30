@@ -597,9 +597,14 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
 
               <form onSubmit={handleGenerateTemplate} className="space-y-3.5">
                 <div>
-                  <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
-                    Statutory Framework / Legal Basis
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="text-xs font-semibold text-[var(--text-muted)] uppercase tracking-wider">
+                      Statutory Framework / Legal Basis
+                    </label>
+                    <span className="text-[10px] text-[var(--text-dim)] font-mono">
+                      Suggested based on domain; verify applicable jurisdiction
+                    </span>
+                  </div>
                   <select
                     value={templateType}
                     onChange={(e) => setTemplateType(e.target.value)}
@@ -608,10 +613,13 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     <option value="CCPA_DELETE">CCPA / CPRA Deletion & Do-Not-Sell (California / US)</option>
                     <option value="GDPR_ERASURE">GDPR Article 17 Erasure & Art. 21 Objection (EU / UK)</option>
                     <option value="TCPA_COMPLAINT">TCPA Revocation & Internal DNC Demand (US FCC/FTC)</option>
-                    <option value="DPDP_ACT_2023">DPDP Act 2023 Consent Revocation & Erasure (India)</option>
+                    <option value="DPDP_ACT_2023">DPDP Act 2023 Consent Revocation & Erasure (India - Rules Pending Notification)</option>
                     <option value="TRAI_1909">TRAI 1909 Commercial Comm. Violation (India TCCCPR)</option>
                     <option value="MERCHANT_UNSUBSCRIBE">Merchant Marketing Opt-Out Notice</option>
                   </select>
+                  <p className="text-[10px] text-[var(--text-dim)] mt-1">
+                    Jurisdiction recommendations are suggestions for user confirmation. Note: DPDP Act 2023 central implementation rules are pending notification by MeitY; the 30-day window is a recommended industry estimate, not a notified statutory deadline.
+                  </p>
                 </div>
 
                 <div>

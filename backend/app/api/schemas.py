@@ -143,9 +143,11 @@ class RemediationHistoryResponse(BaseModel):
     exposure_id: str
     action_id: Optional[str] = None
     source_id: Optional[str] = None
+    canonical_url: Optional[str] = None
     current_status: Optional[str] = None
     request_type: Optional[str] = None
     submission_channel: Optional[str] = None
+    submission_ref: Optional[str] = None
     submitted_at: Optional[str] = None
     expected_response_date: Optional[str] = None
     follow_up_date: Optional[str] = None

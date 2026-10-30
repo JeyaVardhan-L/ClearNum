@@ -158,8 +158,66 @@ def test_full_user_workflow_desktop(base_url):
         browser.close()
 
 
+def test_remediation_history_timeline_workflow(base_url):
+    """Test Phase 6D Remediation History Timeline: modal open, chronological audit events, deadline indicators, dismiss, and empty state."""
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(viewport={"width": 1440, "height": 900})
+        page = context.new_page()
+
+        # 1. Navigate and load demo scenario
+        page.goto(base_url, wait_until="networkidle")
+        load_demo_btn = page.locator("button:has-text('Load Demo')").first
+        load_demo_btn.click()
+        page.wait_for_selector("text=Synthetic scenario loaded", timeout=10000)
+        page.wait_for_selector("text=Discovered Exposures", timeout=10000)
+
+        # 2. Click History on fastpeoplesearch row
+        fps_row = page.locator("tr:has-text('fastpeoplesearch.com')")
+        assert fps_row.is_visible()
+        history_btn = fps_row.locator("button:has-text('History')")
+        assert history_btn.is_visible()
+        history_btn.click()
+
+        # 3. Verify History Modal content and await async audit events
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", timeout=6000)
+        modal = page.locator("div[role='dialog']")
+        assert modal.locator("text=fastpeoplesearch.com").first.is_visible()
+        assert modal.locator("text=FPS-REF-89412").is_visible()
+        assert modal.locator("text=Statutory Legal Deadline").is_visible()
+        assert modal.locator("text=CCPA_DELETE").is_visible()
+        assert modal.locator("text=WEB_FORM").is_visible()
+
+        # Wait for forensic audit timeline events to finish loading
+        page.wait_for_selector("text=DRAFT_GENERATION", timeout=6000)
+        assert modal.locator("text=SUBMISSION_RECORD").is_visible()
+        assert modal.locator("text=REQUEST_PREPARED").first.is_visible()
+
+        # 4. Test closing via Close button
+        modal.locator("button:has-text('Close')").click()
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", state="hidden")
+
+        # 5. Re-open and test dismissing via Escape key
+        fps_row.locator("button:has-text('History')").click()
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')")
+        page.keyboard.press("Escape")
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", state="hidden")
+
+        # 6. Test empty audit history state for exposure without actions
+        wp_row = page.locator("tr:has-text('whitepages.com')")
+        assert wp_row.is_visible()
+        wp_row.locator("button:has-text('History')").click()
+        page.wait_for_selector("text=No audit events recorded yet", timeout=6000)
+        wp_modal = page.locator("div[role='dialog']")
+        assert wp_modal.locator("text=No Statutory Basis").is_visible()
+        wp_modal.locator("button:has-text('Close')").click()
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", state="hidden")
+
+        browser.close()
+
+
 def test_mobile_viewport_responsiveness(base_url):
-    """Test responsive rendering on mobile viewport (390x844 iPhone 12/13/14 size)."""
+    """Test responsive rendering on mobile viewport (390x844 iPhone 12/13/14 size) including History modal."""
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(viewport={"width": 390, "height": 844})
@@ -177,6 +235,17 @@ def test_mobile_viewport_responsiveness(base_url):
         # Check table does not cause horizontal page blowout (overflow-x contained)
         table = page.locator("table")
         assert table.is_visible()
+
+        # Test History modal on mobile
+        fps_row = page.locator("tr:has-text('fastpeoplesearch.com')")
+        fps_row.locator("button:has-text('History')").click()
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", timeout=6000)
+        page.wait_for_selector("text=Statutory Legal Deadline", timeout=6000)
+        assert page.locator("text=Statutory Legal Deadline").is_visible()
+
+        # Close history modal via Escape key on mobile
+        page.keyboard.press("Escape")
+        page.wait_for_selector("h3:has-text('Remediation & Audit History')", state="hidden")
 
         # Switch to Remediation Hub via mobile sub-navigation bar
         mobile_btn = page.locator("header button:has-text('Remediation Hub')").first

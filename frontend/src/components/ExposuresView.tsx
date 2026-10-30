@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   ShieldAlert,
   ShieldCheck,
@@ -14,9 +14,11 @@ import {
   HelpCircle,
   MessageSquare,
   Clock,
+  ArrowRight,
+  X,
 } from "lucide-react";
-import type { DiscoveredExposure, PhoneParseResult } from "../types";
-import { transitionAction, verifyExposure } from "../api";
+import type { DiscoveredExposure, PhoneParseResult, RemediationHistory } from "../types";
+import { transitionAction, verifyExposure, getRemediationHistory } from "../api";
 
 interface ExposuresViewProps {
   exposures: DiscoveredExposure[];
@@ -25,6 +27,72 @@ interface ExposuresViewProps {
   onOpenRemediation: (selectedSourceId?: string) => void;
   onNavigateToScan: () => void;
   onLoadDemo: () => void;
+}
+
+function calculateDeadlineIndicator(history: RemediationHistory, nowTimestamp: number) {
+  const basis = history.deadline_basis || "NONE";
+  const hasDates = Boolean(history.expected_response_date || history.follow_up_date);
+  if (!hasDates && basis === "NONE") {
+    return {
+      label: "No response date recorded",
+      statusType: "none",
+      basisLabel: "No Statutory Basis",
+      basisType: "NONE",
+    };
+  }
+
+  const today = new Date(nowTimestamp);
+  today.setHours(0, 0, 0, 0);
+
+  let label = "No response date recorded";
+  let statusType: "future" | "reached" | "overdue" | "none" = "none";
+
+  if (history.expected_response_date) {
+    const expDate = new Date(history.expected_response_date);
+    expDate.setHours(0, 0, 0, 0);
+    const diffTime = expDate.getTime() - today.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 0) {
+      label = `Response expected in ${diffDays} day${diffDays === 1 ? "" : "s"}`;
+      statusType = "future";
+    } else if (diffDays === 0) {
+      label = "Response expected today";
+      statusType = "reached";
+    } else {
+      const overdueDays = Math.abs(diffDays);
+      label = `Follow-up overdue by ${overdueDays} day${overdueDays === 1 ? "" : "s"}`;
+      statusType = "overdue";
+    }
+  } else if (history.follow_up_date) {
+    const fDate = new Date(history.follow_up_date);
+    fDate.setHours(0, 0, 0, 0);
+    const diffTime = fDate.getTime() - today.getTime();
+    const diffDays = Math.round(diffTime / (1000 * 60 * 60 * 24));
+
+    if (diffDays > 0) {
+      label = `Follow-up scheduled in ${diffDays} day${diffDays === 1 ? "" : "s"}`;
+      statusType = "future";
+    } else if (diffDays === 0) {
+      label = "Follow-up date reached";
+      statusType = "reached";
+    } else {
+      const overdueDays = Math.abs(diffDays);
+      label = `Follow-up overdue by ${overdueDays} day${overdueDays === 1 ? "" : "s"}`;
+      statusType = "overdue";
+    }
+  }
+
+  let basisLabel = "No Statutory Basis";
+  if (basis === "STATUTORY") {
+    basisLabel = "Statutory Legal Deadline";
+  } else if (basis === "SOURCE_ESTIMATE") {
+    basisLabel = "Industry / Source Estimate";
+  } else if (basis === "USER_DEFINED") {
+    basisLabel = "User-Defined Date";
+  }
+
+  return { label, statusType, basisLabel, basisType: basis };
 }
 
 export const ExposuresView: React.FC<ExposuresViewProps> = ({
@@ -45,6 +113,9 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     code?: number;
   } | null>(null);
 
+  // Clock baseline timestamp initialized once
+  const [nowTimestamp] = useState<number>(() => Date.now());
+
   // Transition state modal
   const [transitioningExposure, setTransitioningExposure] = useState<DiscoveredExposure | null>(null);
   const [targetNextState, setTargetNextState] = useState<string>("SUBMITTED");
@@ -52,6 +123,34 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
   const [transitionNotes, setTransitionNotes] = useState<string>("");
   const [transitionLoading, setTransitionLoading] = useState<boolean>(false);
   const [transitionError, setTransitionError] = useState<string | null>(null);
+
+  // History timeline modal & cache
+  const [selectedHistoryExposure, setSelectedHistoryExposure] = useState<DiscoveredExposure | null>(null);
+  const [historyData, setHistoryData] = useState<RemediationHistory | null>(null);
+  const [historyLoading, setHistoryLoading] = useState<boolean>(false);
+  const [historyError, setHistoryError] = useState<string | null>(null);
+  const [historyCache, setHistoryCache] = useState<Record<string, RemediationHistory>>({});
+
+  // Computed deadline status
+  const deadlineIndicator = useMemo(() => {
+    if (!historyData) return null;
+    return calculateDeadlineIndicator(historyData, nowTimestamp);
+  }, [historyData, nowTimestamp]);
+
+  // Keyboard navigation & modal dismiss
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        if (transitioningExposure) {
+          setTransitioningExposure(null);
+        } else if (selectedHistoryExposure) {
+          setSelectedHistoryExposure(null);
+        }
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [transitioningExposure, selectedHistoryExposure]);
 
   const filteredExposures = exposures.filter((exp) => {
     const matchesStatus = statusFilter === "ALL" || exp.remediation_status === statusFilter;
@@ -62,6 +161,35 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
       exp.url.toLowerCase().includes(searchQuery.toLowerCase());
     return matchesStatus && matchesSearch;
   });
+
+  const fetchHistory = async (exposureId: string, hmac: string) => {
+    setHistoryLoading(true);
+    setHistoryError(null);
+    try {
+      const data = await getRemediationHistory(exposureId, hmac);
+      setHistoryCache((prev) => ({ ...prev, [exposureId]: data }));
+      setHistoryData(data);
+    } catch (err: any) {
+      setHistoryError(err.message || "Failed to load remediation history.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const handleOpenHistory = (exposure: DiscoveredExposure) => {
+    setSelectedHistoryExposure(exposure);
+    if (!currentIdentity?.hmac_id) {
+      setHistoryError("Identity HMAC not active.");
+      return;
+    }
+    if (historyCache[exposure.id]) {
+      setHistoryData(historyCache[exposure.id]);
+      setHistoryLoading(false);
+      setHistoryError(null);
+    } else {
+      fetchHistory(exposure.id, currentIdentity.hmac_id);
+    }
+  };
 
   const handleVerifyLive = async (exposure: DiscoveredExposure) => {
     if (!currentIdentity) return;
@@ -81,6 +209,17 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         notes: res.evidence_notes,
         code: res.http_status_code,
       });
+
+      // Invalidate cached history for this exposure
+      setHistoryCache((prev) => {
+        const next = { ...prev };
+        delete next[exposure.id];
+        return next;
+      });
+      if (selectedHistoryExposure?.id === exposure.id && currentIdentity.hmac_id) {
+        fetchHistory(exposure.id, currentIdentity.hmac_id);
+      }
+
       onRefresh();
     } catch (err: any) {
       setVerificationFeedback({
@@ -108,9 +247,22 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         submissionRef,
         transitionNotes
       );
+
+      const targetExpId = transitioningExposure.id;
       setTransitioningExposure(null);
       setSubmissionRef("");
       setTransitionNotes("");
+
+      // Invalidate history cache for this exposure
+      setHistoryCache((prev) => {
+        const next = { ...prev };
+        delete next[targetExpId];
+        return next;
+      });
+      if (selectedHistoryExposure?.id === targetExpId && currentIdentity.hmac_id) {
+        fetchHistory(targetExpId, currentIdentity.hmac_id);
+      }
+
       onRefresh();
     } catch (err: any) {
       setTransitionError(err.message || "Invalid state transition.");
@@ -204,6 +356,12 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
 
   const getStatusBadge = (status: string) => {
     switch (status) {
+      case "REQUEST_PREPARED":
+        return (
+          <span className="status-pill pill-pixel-yellow">
+            <FileText className="w-3 h-3" /> Request Prepared
+          </span>
+        );
       case "SOURCE_CONFIRMED_REMOVAL":
         return (
           <span className="status-pill pill-pixel-green">
@@ -223,6 +381,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             <FileText className="w-3 h-3" /> Search Result Delisted
           </span>
         );
+      case "REQUEST_SUBMITTED":
       case "SUBMITTED":
         return (
           <span className="status-pill pill-pixel-cyan">
@@ -242,9 +401,28 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
           </span>
         );
       case "REJECTED_MATCH":
+      case "REMOVAL_REJECTED":
         return (
           <span className="status-pill pill-pixel-purple">
-            <XCircle className="w-3 h-3" /> Rejected Match
+            <XCircle className="w-3 h-3" /> {status === "REMOVAL_REJECTED" ? "Removal Rejected" : "Rejected Match"}
+          </span>
+        );
+      case "INACCESSIBLE_OR_INCONCLUSIVE":
+        return (
+          <span className="status-pill pill-pixel-yellow">
+            <AlertTriangle className="w-3 h-3" /> Inaccessible / Inconclusive
+          </span>
+        );
+      case "STILL_VISIBLE":
+        return (
+          <span className="status-pill pill-pixel-red">
+            <AlertTriangle className="w-3 h-3" /> Still Visible at URL
+          </span>
+        );
+      case "CONFIRMED_EXPOSURE":
+        return (
+          <span className="status-pill pill-pixel-yellow">
+            <AlertTriangle className="w-3 h-3" /> Confirmed Exposure
           </span>
         );
       case "AWAITING_USER_APPROVAL":
@@ -259,6 +437,37 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             <AlertTriangle className="w-3 h-3" /> {status}
           </span>
         );
+    }
+  };
+
+  const getLifecycleExplanation = (status: string) => {
+    switch (status) {
+      case "REQUEST_PREPARED":
+        return "Notice Prepared: Generated locally. Request has not been transmitted externally.";
+      case "SUBMITTED":
+      case "REQUEST_SUBMITTED":
+        return "Submission Recorded: External submission recorded by user. Awaiting recipient response.";
+      case "ACKNOWLEDGED":
+        return "Receipt Acknowledged: Broker confirmed receiving notice. Listing is not yet verified removed.";
+      case "SOURCE_CONFIRMED_REMOVAL":
+        return "Source Claimed Removal: Broker claims data is purged. Live verification required.";
+      case "NO_LONGER_VISIBLE_AT_CHECKED_URL":
+      case "VERIFIED_REMOVED":
+        return "Verified Absent at URL: Live HTTP check confirmed phone number is absent (HTTP 404/410/Absence). Does not prove internal database copies are deleted.";
+      case "SEARCH_RESULT_DELISTED":
+        return "Search Index Delisted: Removed from public search engine cache. Host site may retain data.";
+      case "INACCESSIBLE_OR_INCONCLUSIVE":
+        return "Check Inconclusive: Target URL unreachable or anti-bot challenge (HTTP 403). Not verified removed.";
+      case "STILL_VISIBLE":
+        return "Still Visible: Telephone number was detected at the checked URL during verification.";
+      case "REMOVAL_REJECTED":
+        return "Removal Rejected: Broker or recipient refused compliance or rejected request.";
+      case "CONFIRMED_EXPOSURE":
+        return "Discovered Exposure: Verified phone number match in public records awaiting remediation action.";
+      case "REJECTED_MATCH":
+        return "Rejected Match: Filtered out as false positive, UUID, date, or unrelated listing.";
+      default:
+        return "Current truthful lifecycle state.";
     }
   };
 
@@ -301,6 +510,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             >
               <option value="ALL">All Statuses</option>
               <option value="DISCOVERED">Discovered</option>
+              <option value="REQUEST_PREPARED">Request Prepared</option>
               <option value="VERIFIED">Verified</option>
               <option value="ACTION_AVAILABLE">Action Available</option>
               <option value="SUBMITTED">Submitted</option>
@@ -418,10 +628,10 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
               <thead>
                 <tr>
                   <th style={{ width: "20%" }}>SOURCE / DOMAIN</th>
-                  <th style={{ width: "34%" }}>INDEXED LISTING SNIPPET</th>
+                  <th style={{ width: "32%" }}>INDEXED LISTING SNIPPET</th>
                   <th style={{ width: "14%" }}>MATCH CONFIDENCE</th>
                   <th style={{ width: "14%" }}>LIFECYCLE STATE</th>
-                  <th style={{ width: "18%", textAlign: "right", whiteSpace: "nowrap" }}>ACTIONS</th>
+                  <th style={{ width: "20%", textAlign: "right", whiteSpace: "nowrap" }}>ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
@@ -548,6 +758,17 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                       <div className="flex items-center justify-end gap-1.5 flex-nowrap">
                         <button
                           type="button"
+                          onClick={() => handleOpenHistory(exp)}
+                          className="btn btn-secondary py-1 px-2.5 text-[11px] font-medium shrink-0 flex items-center gap-1"
+                          title="View chronological audit events and follow-up timeline"
+                          aria-label={`View history for ${exp.domain}`}
+                        >
+                          <Clock className="w-3 h-3 text-[var(--pixel-purple)]" />
+                          <span>History</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => handleVerifyLive(exp)}
                           disabled={verifyingId === exp.id}
                           className="btn btn-secondary py-1 px-2 text-[11px] shrink-0"
@@ -598,11 +819,16 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
 
       {/* State Transition Modal */}
       {transitioningExposure && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm">
-          <div className="card w-full max-w-lg border-[var(--border-subtle)] shadow-2xl overflow-hidden">
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="transition-modal-title"
+        >
+          <div className="card w-full max-w-lg border-[var(--border-subtle)] shadow-2xl overflow-hidden bg-[var(--bg-card)]">
             <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)]">
               <div>
-                <h3 className="font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
+                <h3 id="transition-modal-title" className="font-bold text-sm text-[var(--text-main)] flex items-center gap-2">
                   <SlidersHorizontal className="w-4 h-4 text-[var(--pixel-cyan)]" />
                   Update Exposure State
                 </h3>
@@ -613,6 +839,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
               <button
                 onClick={() => setTransitioningExposure(null)}
                 className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-1 rounded font-bold"
+                aria-label="Close transition modal"
               >
                 ✕
               </button>
@@ -652,6 +879,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                   <option value="SEARCH_RESULT_DELISTED">
                     SEARCH_RESULT_DELISTED (Search engine delisting completed)
                   </option>
+                  <option value="REMOVAL_REJECTED">REMOVAL_REJECTED (Broker rejected removal request)</option>
                   <option value="REJECTED_MATCH">REJECTED_MATCH (False positive or unrelated listing)</option>
                 </select>
                 <p className="text-[10px] text-[var(--text-dim)] mt-1">
@@ -703,6 +931,335 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Remediation & Audit History Modal */}
+      {selectedHistoryExposure && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-black/80 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="history-modal-title"
+        >
+          <div className="card w-full max-w-2xl border-[var(--border-subtle)] shadow-2xl overflow-hidden max-h-[90vh] flex flex-col bg-[var(--bg-card)]">
+            {/* Modal Header */}
+            <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)] shrink-0">
+              <div className="min-w-0 pr-3">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-[var(--pixel-purple)] shrink-0" />
+                  <h3 id="history-modal-title" className="font-bold text-sm text-[var(--text-main)] truncate">
+                    Remediation &amp; Audit History
+                  </h3>
+                  <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-[var(--bg-input)] border border-[var(--border-subtle)] text-[var(--text-dim)] shrink-0">
+                    {selectedHistoryExposure.source_id}
+                  </span>
+                </div>
+                <div className="font-mono text-[11px] text-[var(--text-dim)] truncate mt-1" title={selectedHistoryExposure.canonical_url || selectedHistoryExposure.url}>
+                  <span className="text-[var(--text-muted)] font-semibold">{selectedHistoryExposure.domain}</span>
+                  <span className="mx-1.5 opacity-40">|</span>
+                  <span>{selectedHistoryExposure.canonical_url || selectedHistoryExposure.url}</span>
+                </div>
+              </div>
+              <button
+                onClick={() => setSelectedHistoryExposure(null)}
+                className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-1.5 rounded transition-colors"
+                aria-label="Close history modal"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Modal Scrollable Body */}
+            <div className="p-4 sm:p-5 overflow-y-auto space-y-4 text-xs">
+              {/* Current Truthful Status Banner */}
+              <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-surface)] space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] font-semibold text-[var(--text-dim)] uppercase tracking-wider">
+                      Current State:
+                    </span>
+                    {getStatusBadge(historyData?.current_status || selectedHistoryExposure.remediation_status)}
+                  </div>
+                  {historyData?.submission_ref && (
+                    <div className="text-[10px] font-mono text-[var(--text-dim)] bg-[var(--bg-input)] px-2 py-0.5 rounded border border-[var(--border-subtle)]">
+                      Ref: <span className="text-[var(--pixel-cyan)] font-semibold">{historyData.submission_ref}</span>
+                    </div>
+                  )}
+                </div>
+                <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                  {getLifecycleExplanation(historyData?.current_status || selectedHistoryExposure.remediation_status)}
+                </p>
+              </div>
+
+              {historyLoading ? (
+                <div className="py-12 flex flex-col items-center justify-center text-[var(--text-dim)] space-y-3">
+                  <RefreshCw className="w-6 h-6 animate-spin text-[var(--pixel-cyan)]" />
+                  <span className="text-xs">Loading forensic audit timeline...</span>
+                </div>
+              ) : historyError ? (
+                <div className="p-4 rounded-lg border border-rose-900 bg-rose-950/20 text-rose-300 space-y-2">
+                  <div className="font-semibold flex items-center gap-2">
+                    <AlertTriangle className="w-4 h-4" />
+                    <span>Failed to load history</span>
+                  </div>
+                  <p className="text-[11px]">{historyError}</p>
+                  <button
+                    onClick={() => currentIdentity?.hmac_id && fetchHistory(selectedHistoryExposure.id, currentIdentity.hmac_id)}
+                    className="btn btn-secondary py-1 px-3 text-xs mt-2"
+                  >
+                    Retry
+                  </button>
+                </div>
+              ) : (
+                <>
+                  {/* Follow-up & Deadline Section */}
+                  {historyData && (
+                    <div className="p-3.5 rounded-lg border border-cyan-900/30 bg-[#0c1424] space-y-3">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <Clock className="w-3.5 h-3.5 text-[var(--pixel-cyan)]" />
+                          <span className="text-[11px] font-semibold text-[var(--text-main)] uppercase tracking-wider">
+                            Follow-Up &amp; Statutory Indicators
+                          </span>
+                        </div>
+                        {/* Basis badge */}
+                        <div>
+                          {historyData.deadline_basis === "STATUTORY" ? (
+                            <span className="status-pill pill-pixel-cyan text-[10px]">
+                              <ShieldCheck className="w-3 h-3" /> Statutory Legal Deadline
+                            </span>
+                          ) : historyData.deadline_basis === "SOURCE_ESTIMATE" ? (
+                            <span className="status-pill pill-pixel-yellow text-[10px]">
+                              <Clock className="w-3 h-3" /> Industry / Source Estimate
+                            </span>
+                          ) : historyData.deadline_basis === "USER_DEFINED" ? (
+                            <span className="status-pill pill-pixel-purple text-[10px]">
+                              <FileText className="w-3 h-3" /> User-Defined Date
+                            </span>
+                          ) : (
+                            <span className="text-[10px] text-[var(--text-dim)] font-mono">
+                              No Statutory Basis
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Relative status pill & dates */}
+                      {deadlineIndicator && (
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5 pt-1">
+                          <div className="bg-[var(--bg-card)] p-2 rounded border border-[var(--border-subtle)]">
+                            <span className="text-[9px] uppercase font-semibold text-[var(--text-dim)] block">
+                              Status Indicator
+                            </span>
+                            <span
+                              className={`text-[11px] font-semibold mt-0.5 block ${
+                                deadlineIndicator.statusType === "future"
+                                  ? "text-[var(--pixel-cyan)]"
+                                  : deadlineIndicator.statusType === "overdue"
+                                  ? "text-rose-400"
+                                  : deadlineIndicator.statusType === "reached"
+                                  ? "text-amber-400"
+                                  : "text-[var(--text-dim)]"
+                              }`}
+                            >
+                              {deadlineIndicator.label}
+                            </span>
+                          </div>
+
+                          <div className="bg-[var(--bg-card)] p-2 rounded border border-[var(--border-subtle)] font-mono">
+                            <span className="text-[9px] uppercase font-semibold text-[var(--text-dim)] block">
+                              Expected Response
+                            </span>
+                            <span className="text-[11px] text-[var(--text-main)] mt-0.5 block">
+                              {historyData.expected_response_date || "Not recorded"}
+                            </span>
+                          </div>
+
+                          <div className="bg-[var(--bg-card)] p-2 rounded border border-[var(--border-subtle)] font-mono">
+                            <span className="text-[9px] uppercase font-semibold text-[var(--text-dim)] block">
+                              Follow-Up Date
+                            </span>
+                            <span className="text-[11px] text-[var(--text-main)] mt-0.5 block">
+                              {historyData.follow_up_date || "Not scheduled"}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Request and submission metadata */}
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-[10px] text-[var(--text-dim)] border-t border-[var(--border-subtle)]/50">
+                        <div>
+                          <span className="block text-[9px] uppercase font-semibold">Request Type:</span>
+                          <span className="text-[var(--text-muted)] font-mono font-semibold">
+                            {historyData.request_type || "None"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] uppercase font-semibold">Channel:</span>
+                          <span className="text-[var(--text-muted)] font-mono">
+                            {historyData.submission_channel || "None"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] uppercase font-semibold">Submitted:</span>
+                          <span className="text-[var(--text-muted)] font-mono">
+                            {historyData.submitted_at
+                              ? new Date(historyData.submitted_at).toLocaleDateString()
+                              : "Not submitted"}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="block text-[9px] uppercase font-semibold">Total Events:</span>
+                          <span className="text-[var(--text-muted)] font-mono">
+                            {historyData.total_events}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Chronological Audit Trail Timeline */}
+                  <div className="space-y-3 pt-2">
+                    <div className="flex items-center justify-between">
+                      <span className="kicker-tag text-[9px]">[ AUDIT LOG — OLDEST TO NEWEST ]</span>
+                      <span className="text-[10px] font-mono text-[var(--text-dim)]">
+                        {historyData?.events.length || 0} recorded event{historyData?.events.length === 1 ? "" : "s"}
+                      </span>
+                    </div>
+
+                    {!historyData || historyData.events.length === 0 ? (
+                      <div className="p-6 rounded-lg border border-dashed border-[var(--border-subtle)] bg-[var(--bg-surface)] text-center space-y-1.5">
+                        <FileText className="w-5 h-5 text-[var(--text-dim)] mx-auto opacity-50" />
+                        <div className="text-xs font-semibold text-[var(--text-muted)]">
+                          No audit events recorded yet
+                        </div>
+                        <p className="text-[10px] text-[var(--text-dim)] max-w-sm mx-auto leading-relaxed">
+                          Audit entries are appended automatically when you generate a prepared request, record external submission, run a verification check, or commit state transitions.
+                        </p>
+                      </div>
+                    ) : (
+                      <div className="relative pl-6 space-y-4 border-l border-[var(--border-subtle)] ml-3 pt-1">
+                        {historyData.events.map((ev, idx) => (
+                          <div key={ev.id || idx} className="relative group">
+                            {/* Dot indicator */}
+                            <div className="absolute -left-[31px] top-1 w-3 h-3 rounded-full bg-[var(--bg-elevated)] border-2 border-[var(--pixel-purple)] group-hover:border-[var(--pixel-cyan)] transition-colors" />
+
+                            <div className="card p-3 space-y-2 bg-[var(--bg-surface)] hover:border-[var(--border-strong)] transition-colors">
+                              {/* Header row: timestamp & transition */}
+                              <div className="flex flex-wrap items-center justify-between gap-1.5 text-[10px]">
+                                <div className="flex items-center gap-1.5">
+                                  <Clock className="w-2.5 h-2.5 text-[var(--text-dim)]" />
+                                  <span className="font-mono text-[var(--text-dim)]">
+                                    {new Date(ev.created_at).toLocaleString()}
+                                  </span>
+                                </div>
+                                <span className="font-mono text-[9px] px-1.5 py-0.5 rounded bg-[var(--bg-input)] border border-[var(--border-subtle)] text-[var(--pixel-purple)]">
+                                  {ev.evidence_type}
+                                </span>
+                              </div>
+
+                              {/* State Transition */}
+                              <div className="flex items-center gap-2 text-[11px] font-mono">
+                                {ev.from_state ? (
+                                  <>
+                                    <span className="text-[var(--text-dim)]">{ev.from_state}</span>
+                                    <ArrowRight className="w-3 h-3 text-[var(--text-dim)]" />
+                                    <span className="text-[var(--pixel-cyan)] font-semibold">{ev.to_state}</span>
+                                  </>
+                                ) : (
+                                  <span className="text-[var(--pixel-cyan)] font-semibold">{ev.to_state}</span>
+                                )}
+                              </div>
+
+                              {/* Notes */}
+                              {ev.evidence_notes && (
+                                <div className="text-[11px] text-[var(--text-muted)] font-mono bg-[var(--bg-input)]/70 p-2 rounded border border-[var(--border-subtle)] break-words leading-relaxed">
+                                  {ev.evidence_notes}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+
+            {/* Modal Footer Quick Actions */}
+            <div className="p-3 sm:p-4 border-t border-[var(--border-subtle)] bg-[var(--bg-surface)] flex flex-wrap items-center justify-between gap-2 shrink-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleVerifyLive(selectedHistoryExposure)}
+                  disabled={verifyingId === selectedHistoryExposure.id}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                  title="Re-fetch this URL live to verify if phone number is absent (HTTP 404/410/Absence)"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${verifyingId === selectedHistoryExposure.id ? "animate-spin" : ""}`} />
+                  <span>{verifyingId === selectedHistoryExposure.id ? "Checking..." : "Verify URL Now"}</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransitioningExposure(selectedHistoryExposure);
+                    setTargetNextState("ACKNOWLEDGED");
+                    setSubmissionRef(historyData?.submission_ref || "");
+                    setTransitionNotes("");
+                    setTransitionError(null);
+                  }}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                  title="Record that recipient acknowledged receiving your request"
+                >
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[var(--pixel-cyan)]" />
+                  <span>Record Acknowledgment</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransitioningExposure(selectedHistoryExposure);
+                    setTargetNextState("SOURCE_CONFIRMED_REMOVAL");
+                    setSubmissionRef(historyData?.submission_ref || "");
+                    setTransitionNotes("");
+                    setTransitionError(null);
+                  }}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                  title="Record that source claimed removal (requires subsequent affirmative verification)"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5 text-[var(--pixel-green)]" />
+                  <span>Record Removal Claim</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTransitioningExposure(selectedHistoryExposure);
+                    setTargetNextState("SUBMITTED");
+                    setSubmissionRef(historyData?.submission_ref || "");
+                    setTransitionNotes("");
+                    setTransitionError(null);
+                  }}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                  title="Update lifecycle state"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--pixel-cyan)]" />
+                  <span>Update Status</span>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setSelectedHistoryExposure(null)}
+                className="btn btn-primary py-1.5 px-4 text-xs font-semibold"
+              >
+                Close
+              </button>
+            </div>
           </div>
         </div>
       )}

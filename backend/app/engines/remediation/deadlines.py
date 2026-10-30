@@ -107,14 +107,12 @@ def calculate_remediation_deadline(
     # 4. DPDP Act 2023 Consent Revocation & Erasure
     elif req_upper in ("DPDP_ACT_2023", "DPDP_NOTICE", "DPDP"):
         days = 30
-        citation = "Digital Personal Data Protection Act (DPDP), 2023, Section 12 Grievance Redressal"
+        citation = "Digital Personal Data Protection Act (DPDP), 2023, Section 12 Grievance Redressal (Rules Pending Notification)"
+        basis = "SOURCE_ESTIMATE"
+        is_estimate = True
         if jur_upper in ("IN", "IND", "INDIA"):
-            basis = "STATUTORY"
-            is_estimate = False
-            notes = "Standard statutory grievance redressal timeline of 30 days under Indian consumer framework; awaiting notified central rules."
+            notes = "DPDP Act central implementation rules are pending notification by MeitY. 30 days is a recommended industry estimate based on general consumer grievance redressal timelines."
         else:
-            basis = "SOURCE_ESTIMATE"
-            is_estimate = True
             notes = f"Target jurisdiction '{jur_upper}' is outside India; 30-day DPDP window applied as non-binding estimate."
 
     # 5. TCPA Revocation & Internal DNC

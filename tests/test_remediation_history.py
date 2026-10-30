@@ -515,3 +515,82 @@ def test_no_hmac_or_phone_leakage_in_api_response(test_env):
         assert "identity_hmac" not in event
         assert raw_phone not in str(event)
 
+# 15. History response includes canonical URL and submission reference
+def test_history_response_includes_canonical_url_and_submission_ref(test_env):
+    db_file, _ = test_env
+    identity_hmac = _insert_test_identity(db_file)
+    exp_id = str(uuid.uuid4())
+    conn = get_db_connection(db_file)
+    now_iso = utc_now_iso()
+    test_canonical = "https://broker.example.com/profiles/canonical-1"
+    conn.execute("""
+        INSERT INTO exposures (
+            id, identity_hmac, source_id, url, canonical_url, evidence_origin, domain, title,
+            match_type, confidence, snippet, discovered_at, last_checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        exp_id, identity_hmac, "test_broker", "https://broker.example.com/p/1?utm_source=test",
+        test_canonical, "FETCHED_PAGE", "broker.example.com", "Data Profile", "EXACT", 0.95, "Snippet", now_iso, now_iso
+    ))
+    conn.commit()
+    conn.close()
+
+    client = TestClient(app)
+    # Prepare request
+    client.post("/api/remediation/prepare", json={
+        "exposure_id": exp_id,
+        "identity_hmac": identity_hmac,
+        "request_type": "CCPA_DELETE",
+    })
+    # Submit with reference
+    client.post("/api/remediation/submit", json={
+        "exposure_id": exp_id,
+        "identity_hmac": identity_hmac,
+        "submission_channel": "WEB_FORM",
+        "submission_ref": "OPT-OUT-77621",
+        "notes": "Submitted via broker online web portal",
+    })
+
+    hist_resp = client.get(f"/api/remediation/history/{exp_id}?identity_hmac={identity_hmac}")
+    assert hist_resp.status_code == 200
+    data = hist_resp.json()
+    assert data["exposure_id"] == exp_id
+    assert data["canonical_url"] == test_canonical
+    assert data["submission_ref"] == "OPT-OUT-77621"
+    assert data["submission_channel"] == "WEB_FORM"
+    assert data["total_events"] == 2
+    # Chronological order check: event 0 was prepare, event 1 was submit
+    assert data["events"][0]["to_state"] == "REQUEST_PREPARED"
+    assert data["events"][1]["to_state"] == "SUBMITTED"
+
+
+# 16. History response for exposure without action includes canonical URL
+def test_history_response_for_exposure_without_action_includes_canonical_url(test_env):
+    db_file, _ = test_env
+    identity_hmac = _insert_test_identity(db_file)
+    exp_id = str(uuid.uuid4())
+    conn = get_db_connection(db_file)
+    now_iso = utc_now_iso()
+    test_canonical = "https://unremediated.example.com/record/42"
+    conn.execute("""
+        INSERT INTO exposures (
+            id, identity_hmac, source_id, url, canonical_url, evidence_origin, domain, title,
+            match_type, confidence, snippet, discovered_at, last_checked_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        exp_id, identity_hmac, "test_broker", test_canonical,
+        test_canonical, "SEARCH_SNIPPET", "unremediated.example.com", "Snippet Only", "PROBABLE", 0.70, "Snippet", now_iso, now_iso
+    ))
+    conn.commit()
+    conn.close()
+
+    client = TestClient(app)
+    hist_resp = client.get(f"/api/remediation/history/{exp_id}?identity_hmac={identity_hmac}")
+    assert hist_resp.status_code == 200
+    data = hist_resp.json()
+    assert data["exposure_id"] == exp_id
+    assert data["canonical_url"] == test_canonical
+    assert data["action_id"] is None
+    assert data["submission_ref"] is None
+    assert data["total_events"] == 0
+    assert data["events"] == []

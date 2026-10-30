@@ -254,9 +254,11 @@ export interface RemediationHistory {
   exposure_id: string;
   action_id?: string;
   source_id?: string;
+  canonical_url?: string;
   current_status?: string;
   request_type?: string;
   submission_channel?: string;
+  submission_ref?: string;
   submitted_at?: string;
   expected_response_date?: string;
   follow_up_date?: string;

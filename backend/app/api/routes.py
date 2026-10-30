@@ -959,14 +959,16 @@ def get_remediation_history_endpoint(
     cursor = conn.cursor()
 
     # Verify exposure exists and belongs to requesting identity
-    cursor.execute("SELECT id, identity_hmac FROM exposures WHERE id = ?", (exposure_id,))
+    cursor.execute("SELECT id, identity_hmac, canonical_url, url FROM exposures WHERE id = ?", (exposure_id,))
     exp_row = cursor.fetchone()
     if not exp_row or exp_row["identity_hmac"] != identity_hmac:
         conn.close()
         raise HTTPException(status_code=404, detail="Exposure not found.")
 
+    canonical_url = exp_row["canonical_url"] or exp_row["url"]
+
     cursor.execute("""
-        SELECT id, source_id, status, request_type, submission_channel, submitted_at,
+        SELECT id, source_id, status, request_type, submission_channel, submission_ref, submitted_at,
                expected_response_date, follow_up_date, deadline_basis
         FROM remediation_actions
         WHERE exposure_id = ? AND identity_hmac = ?
@@ -979,9 +981,11 @@ def get_remediation_history_endpoint(
             exposure_id=exposure_id,
             action_id=None,
             source_id=None,
+            canonical_url=canonical_url,
             current_status=None,
             request_type=None,
             submission_channel=None,
+            submission_ref=None,
             submitted_at=None,
             expected_response_date=None,
             follow_up_date=None,
@@ -1018,9 +1022,11 @@ def get_remediation_history_endpoint(
         exposure_id=exposure_id,
         action_id=act_row["id"],
         source_id=act_row["source_id"],
+        canonical_url=canonical_url,
         current_status=act_row["status"],
         request_type=act_row["request_type"],
         submission_channel=act_row["submission_channel"],
+        submission_ref=redact_text(act_row["submission_ref"]) if act_row["submission_ref"] else None,
         submitted_at=act_row["submitted_at"],
         expected_response_date=act_row["expected_response_date"],
         follow_up_date=act_row["follow_up_date"],
@@ -1853,11 +1859,29 @@ def load_synthetic_scenario_endpoint():
             """, (status, rem_url, sub_ref, notes, now_iso, act_row[0]))
         else:
             act_id = str(uuid.uuid4())
+            req_type = "CCPA_DELETE" if source_id == "fastpeoplesearch" else None
+            sub_chan = "WEB_FORM" if source_id == "fastpeoplesearch" else None
+            exp_date = "2026-12-01" if source_id == "fastpeoplesearch" else None
+            fol_date = "2026-11-15" if source_id == "fastpeoplesearch" else None
+            dead_basis = "STATUTORY" if source_id == "fastpeoplesearch" else "NONE"
+            sub_time = now_iso if status == "SUBMITTED" else None
             cursor.execute("""
                 INSERT INTO remediation_actions (
-                    id, exposure_id, identity_hmac, source_id, status, official_url, submission_ref, notes, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (act_id, exp_id, norm.hmac_id, source_id, status, rem_url, sub_ref, notes, now_iso))
+                    id, exposure_id, identity_hmac, source_id, status, official_url, submission_ref, notes, updated_at,
+                    request_type, submission_channel, submitted_at, expected_response_date, follow_up_date, deadline_basis
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (act_id, exp_id, norm.hmac_id, source_id, status, rem_url, sub_ref, notes, now_iso,
+                  req_type, sub_chan, sub_time, exp_date, fol_date, dead_basis))
+
+            if status in ("SUBMITTED", "VERIFIED_REMOVED"):
+                cursor.execute("""
+                    INSERT INTO action_audit_log (id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (str(uuid.uuid4()), act_id, norm.hmac_id, "CONFIRMED_EXPOSURE", "REQUEST_PREPARED", "DRAFT_GENERATION", "Prepared CCPA removal request notice draft", now_iso))
+                cursor.execute("""
+                    INSERT INTO action_audit_log (id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (str(uuid.uuid4()), act_id, norm.hmac_id, "REQUEST_PREPARED", status, "SUBMISSION_RECORD" if status == "SUBMITTED" else "HTTP_LIVE_VERIFICATION", notes, now_iso))
 
     # Synthetic Spam Incidents
     incidents = [

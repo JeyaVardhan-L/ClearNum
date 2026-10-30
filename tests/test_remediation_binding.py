@@ -339,6 +339,12 @@ def test_deadlines_not_mislabeled_as_statutory():
     assert res_trai_in.is_estimate is False
     assert res_trai_in.days == 7
 
+    # DPDP applied in India is an estimate because central rules are pending notification
+    res_dpdp_in = calculate_remediation_deadline("DPDP_ACT_2023", jurisdiction="IN")
+    assert res_dpdp_in.deadline_basis == "SOURCE_ESTIMATE"
+    assert res_dpdp_in.is_estimate is True
+    assert "pending notification" in res_dpdp_in.notes.lower()
+
 
 # 11. Audit history records preparation and submission separately
 def test_audit_history_records_prep_and_submission_separately(test_env):
