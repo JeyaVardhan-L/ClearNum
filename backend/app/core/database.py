@@ -20,18 +20,29 @@ KNOWN_NUMBERSHIELD_TABLES = {
 }
 
 
+class DatabaseCorruptionError(RuntimeError):
+    """Raised when an existing database file has an invalid or corrupted SQLite header."""
+    pass
+
+
 def get_db_connection(db_path: Optional[Path] = None) -> sqlite3.Connection:
-    """Returns a connection to the local SQLite database with row factory enabled."""
+    """Returns a connection to the local SQLite database with row factory enabled.
+    
+    Preserves existing files byte-for-byte and raises DatabaseCorruptionError if an existing
+    file does not start with the standard SQLite format header. Never unlinks or replaces
+    a corrupted database.
+    """
     target_path = (db_path or settings.db_path).resolve()
     target_path.parent.mkdir(parents=True, exist_ok=True)
     if target_path.exists():
-        try:
-            with open(target_path, "rb") as f:
-                header = f.read(16)
-            if len(header) < 16 or not header.startswith(b"SQLite format 3\x00"):
-                target_path.unlink(missing_ok=True)
-        except Exception:
-            pass
+        with open(target_path, "rb") as f:
+            header = f.read(16)
+        if len(header) < 16 or not header.startswith(b"SQLite format 3\x00"):
+            raise DatabaseCorruptionError(
+                f"Database file at '{target_path}' is corrupted or not a valid SQLite database "
+                f"(invalid header: {header!r}). The original file has been preserved byte-for-byte. "
+                "Application startup halted to prevent accidental data loss."
+            )
     conn = sqlite3.connect(str(target_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL;")
@@ -204,6 +215,33 @@ def init_db(db_path: Optional[Path] = None) -> None:
     missing_cols = required_cols - verified_cols
     if missing_cols:
         raise RuntimeError(f"Database migration verification failed. Missing columns on remediation_actions: {missing_cols}")
+
+    # TASK 5: Idempotent Unique Index on remediation_actions(exposure_id)
+    # 1. Check if index already exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type = 'index' AND name = 'idx_remediation_actions_exposure_unique';")
+    if not cursor.fetchone():
+        # 2. Check for duplicate exposure_id records before applying uniqueness
+        cursor.execute("""
+            SELECT exposure_id, COUNT(*) as cnt
+            FROM remediation_actions
+            GROUP BY exposure_id
+            HAVING cnt > 1;
+        """)
+        duplicates = cursor.fetchall()
+        if duplicates:
+            dup_summary = ", ".join(f"{r['exposure_id']} ({r['cnt']} records)" for r in duplicates)
+            raise RuntimeError(
+                f"Database migration aborted: Duplicate exposure_id rows detected in remediation_actions: [{dup_summary}]. "
+                "Migration stopped safely to preserve all existing records. "
+                "Resolve duplicate remediation actions before applying unique index."
+            )
+        try:
+            cursor.execute("""
+                CREATE UNIQUE INDEX IF NOT EXISTS idx_remediation_actions_exposure_unique
+                ON remediation_actions(exposure_id);
+            """)
+        except sqlite3.Error as e:
+            raise RuntimeError(f"Failed to create unique index on remediation_actions(exposure_id): {e}") from e
 
     conn.commit()
     conn.close()

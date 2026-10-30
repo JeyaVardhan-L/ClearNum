@@ -1072,16 +1072,32 @@ def generate_template_endpoint(req: GenerateTemplateRequest):
     bound_source_id = None
     resolved_target_url = req.target_url
 
-    # If exposure_id provided, bind to exposure under strict identity validation
+    norm = parse_and_normalize(req.phone_number, req.default_region) if req.phone_number else None
+    caller_hmac = norm.hmac_id if (norm and norm.hmac_id) else req.identity_hmac
+
+    # TASK 2: Strict identity validation when binding notice to an exposure
     if req.exposure_id:
+        if not caller_hmac:
+            conn.close()
+            raise HTTPException(
+                status_code=400,
+                detail="Identity information (phone_number or identity_hmac) is required to bind notice to an exposure."
+            )
+        if req.identity_hmac and norm and norm.hmac_id and req.identity_hmac != norm.hmac_id:
+            conn.close()
+            raise HTTPException(
+                status_code=403,
+                detail="Identity mismatch between phone number and identity HMAC."
+            )
+
         cursor.execute("SELECT id, identity_hmac, source_id, url, canonical_url FROM exposures WHERE id = ?", (req.exposure_id,))
         exp_row = cursor.fetchone()
         if not exp_row:
             conn.close()
             raise HTTPException(status_code=404, detail="Exposure not found.")
-        if req.identity_hmac and exp_row["identity_hmac"] != req.identity_hmac:
+        if exp_row["identity_hmac"] != caller_hmac:
             conn.close()
-            raise HTTPException(status_code=404, detail="Exposure not found.")
+            raise HTTPException(status_code=403, detail="Access denied: exposure does not belong to the supplied identity.")
         
         bound_canonical_url = exp_row["canonical_url"] or exp_row["url"]
         bound_source_id = exp_row["source_id"]
@@ -1090,7 +1106,8 @@ def generate_template_endpoint(req: GenerateTemplateRequest):
 
     conn.close()
 
-    norm = parse_and_normalize(req.phone_number, req.default_region)
+    if not norm:
+        norm = parse_and_normalize(req.phone_number, req.default_region)
     t_type = req.template_type.upper()
 
     if t_type in ("CCPA_DELETE", "CCPA_DELETION"):
@@ -1409,13 +1426,41 @@ def calculate_deadline_endpoint(req: CalculateDeadlineRequest):
 
 @router.post("/remediation/verify", response_model=RescanVerificationResponse)
 async def verify_exposure_endpoint(req: RescanVerificationRequest):
+    if not req.phone_number:
+        raise HTTPException(status_code=400, detail="Phone number is required for verification.")
     norm = parse_and_normalize(req.phone_number, req.default_region)
-    outcome = await verify_exposure_url(
-        exposure_id=req.exposure_id,
-        url=req.url,
-        phone=norm,
-        update_database=True,
-    )
+    if not norm or not norm.hmac_id:
+        raise HTTPException(status_code=400, detail="Invalid phone number format.")
+
+    # TASK 1: Ownership pre-check before ANY network fetch or DB mutation
+    if req.exposure_id and req.exposure_id != "AD-HOC-VERIFICATION":
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT id, identity_hmac FROM exposures WHERE id = ?", (req.exposure_id,))
+        exp_row = cursor.fetchone()
+        if not exp_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Exposure not found.")
+        if exp_row["identity_hmac"] != norm.hmac_id:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Access denied: exposure does not belong to caller.")
+
+        cursor.execute("SELECT id, identity_hmac FROM remediation_actions WHERE exposure_id = ?", (req.exposure_id,))
+        act_row = cursor.fetchone()
+        if act_row and act_row["identity_hmac"] != norm.hmac_id:
+            conn.close()
+            raise HTTPException(status_code=403, detail="Access denied: remediation record does not belong to caller.")
+        conn.close()
+
+    try:
+        outcome = await verify_exposure_url(
+            exposure_id=req.exposure_id,
+            url=req.url,
+            phone=norm,
+            update_database=True,
+        )
+    except PermissionError as e:
+        raise HTTPException(status_code=403, detail=str(e))
     return RescanVerificationResponse(
         url=outcome.url,
         status=outcome.status,

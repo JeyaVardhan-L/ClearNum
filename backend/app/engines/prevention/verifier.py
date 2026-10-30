@@ -141,7 +141,7 @@ def is_generic_redirect(initial_url: str, final_url: Optional[str]) -> tuple[boo
     final_parsed = urlparse(final_url.strip())
 
     init_path = init_parsed.path.rstrip("/")
-    final_path = final_parsed.path.rstrip("/")
+    final_path = final_parsed.path.rstrip("/").lower()
 
     # If the initial path was a deep path (more than root)
     if init_path and init_path not in ("", "/"):
@@ -149,10 +149,12 @@ def is_generic_redirect(initial_url: str, final_url: Optional[str]) -> tuple[boo
         if final_path in ("", "/"):
             return True, "redirected to domain homepage"
 
-        # Redirected to login / auth / search
-        generic_endpoints = {"/login", "/signin", "/auth", "/session", "/search", "/portal"}
-        if final_path in generic_endpoints:
-            return True, f"redirected to generic landing page ('{final_path}')"
+        # Redirected to login / auth / search / portal
+        generic_tokens = {"/login", "/signin", "/sign-in", "/auth", "/session", "/search", "/portal"}
+        if final_path in generic_tokens or any(final_path.endswith(t) for t in generic_tokens):
+            return True, f"redirected to login or authentication landing page ('{final_path}')"
+        if any(f"{t}/" in final_path or f"{t}?" in final_url.lower() for t in ("/login", "/signin", "/auth")):
+            return True, f"redirected to login or authentication page ('{final_path}')"
 
     return False, ""
 
@@ -175,6 +177,22 @@ async def verify_exposure_url(
 ) -> VerificationOutcome:
     """Rescans an exposure URL safely, validates content, and records a truthful verification outcome."""
     now_iso = utc_now_iso()
+
+    # TASK 1: Ownership pre-check before ANY network fetch or DB mutation
+    if update_database and exposure_id and exposure_id != "AD-HOC-VERIFICATION" and phone and phone.hmac_id:
+        conn = get_db_connection()
+        cursor = conn.cursor()
+        cursor.execute("SELECT identity_hmac FROM exposures WHERE id = ?", (exposure_id,))
+        exp_row = cursor.fetchone()
+        if exp_row and exp_row["identity_hmac"] != phone.hmac_id:
+            conn.close()
+            raise PermissionError(f"Access denied: Exposure {exposure_id} does not belong to caller identity.")
+        cursor.execute("SELECT identity_hmac FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
+        act_row = cursor.fetchone()
+        if act_row and act_row["identity_hmac"] != phone.hmac_id:
+            conn.close()
+            raise PermissionError(f"Access denied: Remediation action for {exposure_id} does not belong to caller identity.")
+        conn.close()
 
     # Determine evidence origin if not explicitly provided
     if not evidence_origin:
@@ -227,7 +245,7 @@ async def verify_exposure_url(
             )
 
         if update_database:
-            _update_remediation_action_record(exposure_id, outcome)
+            _update_remediation_action_record(exposure_id, outcome, expected_identity_hmac=phone.hmac_id if phone else None)
         return outcome
 
     # Live Web Verification Flow
@@ -250,7 +268,7 @@ async def verify_exposure_url(
             evidence_origin="FETCHED_PAGE",
         )
         if update_database:
-            _update_remediation_action_record(exposure_id, outcome)
+            _update_remediation_action_record(exposure_id, outcome, expected_identity_hmac=phone.hmac_id if phone else None)
         return outcome
     except SSRFValidationError as e:
         outcome = VerificationOutcome(
@@ -265,7 +283,7 @@ async def verify_exposure_url(
             evidence_origin="FETCHED_PAGE",
         )
         if update_database:
-            _update_remediation_action_record(exposure_id, outcome)
+            _update_remediation_action_record(exposure_id, outcome, expected_identity_hmac=phone.hmac_id if phone else None)
         return outcome
     except Exception as e:
         outcome = VerificationOutcome(
@@ -280,7 +298,7 @@ async def verify_exposure_url(
             evidence_origin="FETCHED_PAGE",
         )
         if update_database:
-            _update_remediation_action_record(exposure_id, outcome)
+            _update_remediation_action_record(exposure_id, outcome, expected_identity_hmac=phone.hmac_id if phone else None)
         return outcome
 
     content_hash = hashlib.sha256(content.encode("utf-8", errors="replace")).hexdigest()
@@ -366,14 +384,32 @@ async def verify_exposure_url(
                     evidence_origin="FETCHED_PAGE",
                 )
             elif is_redirected:
+                # TASK 4: Ambiguous redirect to homepage, login, or search is INCONCLUSIVE, not proof of deletion
                 outcome = VerificationOutcome(
                     url=url,
-                    status="NO_LONGER_VISIBLE_AT_CHECKED_URL",
-                    outcome="VERIFIED_ABSENT",
+                    status="INACCESSIBLE_OR_INCONCLUSIVE",
+                    outcome="INCONCLUSIVE",
                     http_status_code=200,
                     evidence_notes=(
-                        f"No longer visible: Specific profile URL {redir_desc} ('{final_url}'). "
-                        "Telephone number absent from destination. Verified absent at checked URL."
+                        f"Inconclusive redirect: Specific profile URL {redir_desc} ('{final_url}'). "
+                        "A redirect to a homepage, login page, or search portal does not prove deletion. "
+                        "Underlying database record may still exist. Manual verification required."
+                    ),
+                    content_hash=content_hash,
+                    verified_at=now_iso,
+                    final_url=final_url,
+                    evidence_origin="FETCHED_PAGE",
+                )
+            elif len(clean_text.strip()) == 0:
+                # Incomplete or blank page
+                outcome = VerificationOutcome(
+                    url=url,
+                    status="INACCESSIBLE_OR_INCONCLUSIVE",
+                    outcome="INCONCLUSIVE",
+                    http_status_code=200,
+                    evidence_notes=(
+                        "Inconclusive response: Webpage returned HTTP 200 with empty text content. "
+                        "Absence cannot be verified on a blank or incomplete page. Manual inspection required."
                     ),
                     content_hash=content_hash,
                     verified_at=now_iso,
@@ -411,12 +447,16 @@ async def verify_exposure_url(
         )
 
     if update_database:
-        _update_remediation_action_record(exposure_id, outcome)
+        _update_remediation_action_record(exposure_id, outcome, expected_identity_hmac=phone.hmac_id if phone else None)
 
     return outcome
 
 
-def _update_remediation_action_record(exposure_id: str, outcome: VerificationOutcome) -> None:
+def _update_remediation_action_record(
+    exposure_id: str,
+    outcome: VerificationOutcome,
+    expected_identity_hmac: Optional[str] = None,
+) -> None:
     """Updates the remediation_actions table with verification outcome and appends an immutable audit event."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -429,6 +469,9 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
 
     action_id = act_row["id"]
     identity_hmac = act_row["identity_hmac"]
+    if expected_identity_hmac and identity_hmac != expected_identity_hmac:
+        conn.close()
+        raise PermissionError(f"Remediation action for {exposure_id} belongs to different identity.")
     current_status = act_row["status"] or "DISCOVERED"
     new_status = current_status
     evidence_type = "HTTP_LIVE_VERIFICATION"

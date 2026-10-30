@@ -41,6 +41,7 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
     http_status_code?: number;
     evidence_notes: string;
     verified_at: string;
+    outcome?: string;
   } | null>(null);
 
   // MBOX State
@@ -261,19 +262,25 @@ export const VerificationAudit: React.FC<VerificationAuditProps> = ({
             {rescanResult && (
               <div
                 className={`p-3.5 rounded-lg border text-xs space-y-1.5 ${
-                  rescanResult.status === "VERIFIED_REMOVED"
+                  rescanResult.status === "VERIFIED_REMOVED" || rescanResult.status === "NO_LONGER_VISIBLE_AT_CHECKED_URL"
                     ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-400"
-                    : rescanResult.status === "VERIFIED"
+                    : rescanResult.status === "INACCESSIBLE_OR_INCONCLUSIVE" || rescanResult.outcome === "INCONCLUSIVE" || rescanResult.outcome === "INACCESSIBLE"
+                    ? "border-amber-500/40 bg-amber-950/20 text-amber-400"
+                    : rescanResult.status === "VERIFIED" || rescanResult.status === "STILL_VISIBLE" || rescanResult.status === "REAPPEARED" || rescanResult.status === "CONFIRMED_EXPOSURE"
                     ? "border-rose-500/40 bg-rose-950/20 text-rose-400"
                     : "border-[var(--border-subtle)] bg-[var(--bg-app)] text-[var(--text-main)]"
                 }`}
               >
                 <div className="flex items-center justify-between">
                   <span className="font-semibold flex items-center gap-1.5">
-                    {rescanResult.status === "VERIFIED_REMOVED" ? (
-                      <CheckCircle2 className="w-4 h-4" />
+                    {rescanResult.status === "VERIFIED_REMOVED" || rescanResult.status === "NO_LONGER_VISIBLE_AT_CHECKED_URL" ? (
+                      <CheckCircle2 className="w-4 h-4 text-emerald-400" />
                     ) : (
-                      <AlertTriangle className="w-4 h-4" />
+                      <AlertTriangle className={`w-4 h-4 ${
+                        rescanResult.status === "INACCESSIBLE_OR_INCONCLUSIVE" || rescanResult.outcome === "INCONCLUSIVE" || rescanResult.outcome === "INACCESSIBLE"
+                          ? "text-amber-400"
+                          : "text-rose-400"
+                      }`} />
                     )}
                     Outcome: {rescanResult.status}
                   </span>

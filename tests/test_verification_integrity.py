@@ -199,9 +199,9 @@ async def test_verification_generic_redirect_detection(test_identity_and_exposur
     with patch("backend.app.engines.prevention.verifier.safe_fetch_url", new_callable=AsyncMock, return_value=mock_resp):
         outcome = await verify_exposure_url(fixture["exp_id"], fixture["url"], fixture["norm"], update_database=True)
 
-    assert outcome.outcome == "VERIFIED_ABSENT"
-    assert outcome.status == "NO_LONGER_VISIBLE_AT_CHECKED_URL"
-    assert "redirected to generic" in outcome.evidence_notes.lower() or "homepage" in outcome.evidence_notes.lower()
+    assert outcome.outcome == "INCONCLUSIVE"
+    assert outcome.status == "INACCESSIBLE_OR_INCONCLUSIVE"
+    assert "inconclusive redirect" in outcome.evidence_notes.lower() or "homepage" in outcome.evidence_notes.lower()
 
 
 # --- 7. Redirect Loop / Exceeded Limit ---
