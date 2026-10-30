@@ -111,6 +111,9 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     status: string;
     notes: string;
     code?: number;
+    outcome?: string;
+    soft_404_detected?: boolean;
+    reappeared?: boolean;
   } | null>(null);
 
   // Clock baseline timestamp initialized once
@@ -208,6 +211,9 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         status: res.status,
         notes: res.evidence_notes,
         code: res.http_status_code,
+        outcome: res.outcome,
+        soft_404_detected: res.soft_404_detected,
+        reappeared: res.reappeared,
       });
 
       // Invalidate cached history for this exposure
@@ -533,25 +539,36 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
       {/* Verification Live Alert Banner (if recently triggered) */}
       {verificationFeedback && (
         <div
-          className={`p-3 rounded-lg border flex items-start gap-2.5 ${
-            verificationFeedback.status === "VERIFIED_REMOVED"
-              ? "border-emerald-500/40 bg-emerald-950/20 text-emerald-400"
-              : verificationFeedback.status === "VERIFIED"
-              ? "border-amber-500/40 bg-amber-950/20 text-amber-400"
+          className={`p-3 rounded-lg border flex items-start gap-2.5 transition-all ${
+            verificationFeedback.reappeared
+              ? "border-rose-500/60 bg-rose-950/30 text-rose-300"
+              : verificationFeedback.status === "VERIFIED_REMOVED" || verificationFeedback.status === "NO_LONGER_VISIBLE_AT_CHECKED_URL"
+              ? "border-teal-500/50 bg-teal-950/30 text-teal-300"
+              : verificationFeedback.status === "INACCESSIBLE_OR_INCONCLUSIVE"
+              ? "border-amber-500/50 bg-amber-950/30 text-amber-300"
               : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-main)]"
           }`}
         >
-          {verificationFeedback.status === "VERIFIED_REMOVED" ? (
-            <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0" />
+          {verificationFeedback.reappeared ? (
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-rose-400 animate-pulse" />
+          ) : verificationFeedback.status === "VERIFIED_REMOVED" || verificationFeedback.status === "NO_LONGER_VISIBLE_AT_CHECKED_URL" ? (
+            <ShieldCheck className="w-4 h-4 mt-0.5 shrink-0 text-teal-400" />
           ) : (
-            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0 text-amber-400" />
           )}
           <div className="flex-1">
-            <div className="text-xs font-semibold">
-              Live Rescan Check: {verificationFeedback.status}{" "}
-              {verificationFeedback.code ? `(HTTP ${verificationFeedback.code})` : ""}
+            <div className="text-xs font-semibold flex items-center gap-1.5 flex-wrap">
+              <span>Live Verification: {verificationFeedback.reappeared ? "REAPPEARED" : verificationFeedback.status}</span>
+              {verificationFeedback.code ? (
+                <span className="font-mono text-[10px] opacity-80">(HTTP {verificationFeedback.code})</span>
+              ) : null}
+              {verificationFeedback.soft_404_detected && (
+                <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-teal-900/60 border border-teal-700/50 text-teal-200">
+                  Soft-404 Detected
+                </span>
+              )}
             </div>
-            <div className="text-[11px] opacity-90 mt-0.5">{verificationFeedback.notes}</div>
+            <div className="text-[11px] opacity-90 mt-0.5 font-mono">{verificationFeedback.notes}</div>
           </div>
           <button
             onClick={() => setVerificationFeedback(null)}
@@ -870,9 +887,6 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                 >
                   <option value="SUBMITTED">SUBMITTED (Opt-out request filed)</option>
                   <option value="ACKNOWLEDGED">ACKNOWLEDGED (Broker confirmation received)</option>
-                  <option value="NO_LONGER_VISIBLE_AT_CHECKED_URL">
-                    NO_LONGER_VISIBLE_AT_CHECKED_URL (Live verification check confirms removal)
-                  </option>
                   <option value="SOURCE_CONFIRMED_REMOVAL">
                     SOURCE_CONFIRMED_REMOVAL (Broker verified full database purge)
                   </option>
@@ -883,7 +897,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                   <option value="REJECTED_MATCH">REJECTED_MATCH (False positive or unrelated listing)</option>
                 </select>
                 <p className="text-[10px] text-[var(--text-dim)] mt-1">
-                  Transitions enforce NumberShield truthful state rules. Premature or unverified claims are rejected.
+                  Transitions enforce ClearNum truthful state rules. Verified absence (<span className="font-mono text-cyan-400">NO_LONGER_VISIBLE_AT_CHECKED_URL</span>) cannot be manually chosen; run the "Re-check Live" button to establish HTTP absence proof.
                 </p>
               </div>
 

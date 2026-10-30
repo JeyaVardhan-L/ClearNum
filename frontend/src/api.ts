@@ -275,6 +275,12 @@ export async function verifyExposure(
   http_status_code?: number;
   evidence_notes: string;
   verified_at: string;
+  outcome?: string;
+  final_url?: string;
+  content_hash?: string;
+  evidence_origin?: string;
+  soft_404_detected?: boolean;
+  reappeared?: boolean;
 }> {
   const res = await fetch(`${API_BASE}/remediation/verify`, {
     method: "POST",

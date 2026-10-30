@@ -76,6 +76,26 @@ class SSRFValidationError(Exception):
     pass
 
 
+class UnsupportedContentTypeError(SSRFValidationError):
+    """Raised when an HTTP response contains an unsupported binary or streaming MIME type."""
+    def __init__(self, content_type: str):
+        super().__init__(
+            f"Disallowed content type '{content_type}'. Only HTML, XML, JSON, and text responses are permitted."
+        )
+        self.content_type = content_type
+
+
+class FetchResponse(tuple):
+    """Backward-compatible 3-tuple (status_code, content, headers) exposing .final_url attribute."""
+    def __new__(cls, status_code: int, content: str, headers: dict, final_url: str = ""):
+        instance = super().__new__(cls, (status_code, content, headers))
+        instance.status_code = status_code
+        instance.content = content
+        instance.headers = headers
+        instance.final_url = final_url or ""
+        return instance
+
+
 def is_ip_allowed(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> tuple[bool, str]:
     """Inspects an IP address against forbidden network specifications."""
     if ip.is_loopback:
@@ -328,9 +348,7 @@ async def safe_fetch_url(
                     raw_content_type = response.headers.get("content-type", "")
                     content_type = raw_content_type.split(";")[0].strip().lower()
                     if content_type and not any(content_type == perm for perm in PERMITTED_CONTENT_TYPES):
-                        raise SSRFValidationError(
-                            f"Disallowed content type '{content_type}'. Only HTML, XML, JSON, and text responses are permitted."
-                        )
+                        raise UnsupportedContentTypeError(content_type)
 
                     # Validate declared Content-Length
                     content_length = response.headers.get("content-length")
@@ -356,7 +374,7 @@ async def safe_fetch_url(
                         body_chunks.append(chunk)
 
                     content = b"".join(body_chunks).decode("utf-8", errors="replace")
-                    return response.status_code, content, dict(response.headers)
+                    return FetchResponse(response.status_code, content, dict(response.headers), final_url=current_url)
 
             except httpx.RequestError as exc:
                 raise SSRFValidationError(f"HTTP request error: {exc}")

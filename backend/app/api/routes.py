@@ -847,6 +847,36 @@ def transition_action_endpoint(req: TransitionActionRequest):
 
     canonical_next = normalize_state(req.next_state).value
 
+    clean_notes = redact_text(req.notes).strip() if req.notes else None
+    clean_ref = redact_text(req.submission_ref).strip() if req.submission_ref else None
+
+    # Lifecycle Evidence Enforcement: Removal proof cannot be manually claimed
+    if canonical_next in ("NO_LONGER_VISIBLE_AT_CHECKED_URL", "VERIFIED_REMOVED"):
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Manual transition to NO_LONGER_VISIBLE_AT_CHECKED_URL is forbidden. "
+                "Verified removal requires affirmative verification evidence. Use the live verification rescan endpoint."
+            ),
+        )
+
+    # Acknowledgment requires recorded confirmation receipt or notes
+    if canonical_next == "ACKNOWLEDGED" and not clean_notes and not clean_ref:
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Transition to ACKNOWLEDGED requires a recorded ticket reference or acknowledgment notes.",
+        )
+
+    # Source confirmed removal requires recorded confirmation reference or notes
+    if canonical_next == "SOURCE_CONFIRMED_REMOVAL" and not clean_notes and not clean_ref:
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Transition to SOURCE_CONFIRMED_REMOVAL requires recorded source confirmation receipt or deletion notes.",
+        )
+
     # Validate deadline_basis if supplied
     deadline_basis = (req.deadline_basis or "NONE").upper().strip()
     if deadline_basis not in ("STATUTORY", "SOURCE_ESTIMATE", "USER_DEFINED", "NONE"):
@@ -874,9 +904,6 @@ def transition_action_endpoint(req: TransitionActionRequest):
     new_expected_response_date = req.expected_response_date if req.expected_response_date is not None else row["expected_response_date"]
     new_follow_up_date = req.follow_up_date if req.follow_up_date is not None else row["follow_up_date"]
     new_deadline_basis = deadline_basis if req.deadline_basis is not None else (row["deadline_basis"] or "NONE")
-
-    clean_notes = redact_text(req.notes) if req.notes else None
-    clean_ref = redact_text(req.submission_ref) if req.submission_ref else None
 
     cursor.execute("""
         UPDATE remediation_actions
@@ -1395,6 +1422,12 @@ async def verify_exposure_endpoint(req: RescanVerificationRequest):
         http_status_code=outcome.http_status_code,
         evidence_notes=outcome.evidence_notes,
         verified_at=outcome.verified_at,
+        outcome=outcome.outcome,
+        final_url=outcome.final_url,
+        content_hash=outcome.content_hash,
+        evidence_origin=outcome.evidence_origin,
+        soft_404_detected=outcome.soft_404_detected,
+        reappeared=outcome.reappeared,
     )
 
 

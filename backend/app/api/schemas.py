@@ -270,6 +270,12 @@ class RescanVerificationResponse(BaseModel):
     http_status_code: Optional[int]
     evidence_notes: str
     verified_at: str
+    outcome: Optional[str] = None
+    final_url: Optional[str] = None
+    content_hash: Optional[str] = None
+    evidence_origin: Optional[str] = None
+    soft_404_detected: Optional[bool] = False
+    reappeared: Optional[bool] = False
 
 
 class SpamIncidentRequest(BaseModel):
