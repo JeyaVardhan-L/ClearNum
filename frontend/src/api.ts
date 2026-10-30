@@ -18,6 +18,9 @@ import type {
   DNDCountryGuide,
   SearchRemovalGuide,
   GeneratedTemplate,
+  PrepareRemediationResult,
+  SubmitRemediationResult,
+  RemediationHistory,
   AnalyzeSmsResult,
   PurgeStatusResponse,
   PurgeResponse,
@@ -162,7 +165,9 @@ export async function generateLegalTemplate(
   targetUrl?: string,
   violatorNumber?: string,
   incidentDate?: string,
-  callDescription?: string
+  callDescription?: string,
+  exposureId?: string,
+  identityHmac?: string
 ): Promise<GeneratedTemplate> {
   const res = await fetch(`${API_BASE}/remediation/template`, {
     method: "POST",
@@ -176,7 +181,84 @@ export async function generateLegalTemplate(
       violator_number: violatorNumber,
       incident_date: incidentDate,
       call_description: callDescription,
+      exposure_id: exposureId,
+      identity_hmac: identityHmac,
     }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function prepareRemediationRequest(params: {
+  exposureId: string;
+  identityHmac: string;
+  requestType: string;
+  submissionChannel?: string;
+  recipientName?: string;
+  targetUrl?: string;
+  notes?: string;
+  expectedResponseDate?: string;
+  followUpDate?: string;
+  deadlineBasis?: string;
+}): Promise<PrepareRemediationResult> {
+  const res = await fetch(`${API_BASE}/remediation/prepare`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      exposure_id: params.exposureId,
+      identity_hmac: params.identityHmac,
+      request_type: params.requestType,
+      submission_channel: params.submissionChannel || "WEB_FORM",
+      recipient_name: params.recipientName,
+      target_url: params.targetUrl,
+      notes: params.notes,
+      expected_response_date: params.expectedResponseDate,
+      follow_up_date: params.followUpDate,
+      deadline_basis: params.deadlineBasis || "NONE",
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function submitRemediationRequest(params: {
+  exposureId: string;
+  identityHmac: string;
+  submissionChannel: string;
+  submissionRef?: string;
+  notes?: string;
+  submittedAt?: string;
+  expectedResponseDate?: string;
+  followUpDate?: string;
+  deadlineBasis?: string;
+}): Promise<SubmitRemediationResult> {
+  const res = await fetch(`${API_BASE}/remediation/submit`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      exposure_id: params.exposureId,
+      identity_hmac: params.identityHmac,
+      submission_channel: params.submissionChannel,
+      submission_ref: params.submissionRef,
+      notes: params.notes,
+      submitted_at: params.submittedAt,
+      expected_response_date: params.expectedResponseDate,
+      follow_up_date: params.followUpDate,
+      deadline_basis: params.deadlineBasis || "NONE",
+    }),
+  });
+  if (!res.ok) throw new Error(await res.text());
+  return res.json();
+}
+
+export async function getRemediationHistory(
+  exposureId: string,
+  identityHmac: string
+): Promise<RemediationHistory> {
+  const res = await fetch(`${API_BASE}/remediation/history/${encodeURIComponent(exposureId)}`, {
+    headers: {
+      "X-Identity-HMAC": identityHmac,
+    },
   });
   if (!res.ok) throw new Error(await res.text());
   return res.json();

@@ -39,6 +39,10 @@ from backend.app.engines.remediation.india_registry import (
     get_inventory_summary,
     get_indian_source_by_id,
 )
+from backend.app.engines.remediation.deadlines import (
+    DeadlineInfo,
+    calculate_remediation_deadline,
+)
 
 __all__ = [
     "REMEDIATION_REGISTRY",
@@ -67,4 +71,6 @@ __all__ = [
     "DNDCountryGuide",
     "get_dnd_guide_for_country",
     "get_all_dnd_guides",
+    "DeadlineInfo",
+    "calculate_remediation_deadline",
 ]

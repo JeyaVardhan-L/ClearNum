@@ -200,6 +200,69 @@ export interface GeneratedTemplate {
   title: string;
   subject_line: string;
   body_markdown: string;
+  exposure_id?: string;
+  target_url?: string;
+  canonical_url?: string;
+  source_id?: string;
+  expected_response_date?: string;
+  deadline_basis?: string;
+  deadline_notes?: string;
+  is_estimate?: boolean;
+}
+
+export interface PrepareRemediationResult {
+  success: boolean;
+  action_id: string;
+  exposure_id: string;
+  status: string;
+  request_type: string;
+  submission_channel?: string;
+  submitted_at?: string | null;
+  expected_response_date?: string;
+  follow_up_date?: string;
+  deadline_basis: string;
+  updated_at: string;
+  message: string;
+}
+
+export interface SubmitRemediationResult {
+  success: boolean;
+  action_id: string;
+  exposure_id: string;
+  status: string;
+  submission_channel: string;
+  submission_ref?: string;
+  submitted_at: string;
+  expected_response_date?: string;
+  follow_up_date?: string;
+  deadline_basis: string;
+  updated_at: string;
+  message: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  action_id: string;
+  from_state: string;
+  to_state: string;
+  evidence_type: string;
+  evidence_notes?: string;
+  created_at: string;
+}
+
+export interface RemediationHistory {
+  exposure_id: string;
+  action_id?: string;
+  source_id?: string;
+  current_status?: string;
+  request_type?: string;
+  submission_channel?: string;
+  submitted_at?: string;
+  expected_response_date?: string;
+  follow_up_date?: string;
+  deadline_basis?: string;
+  total_events: number;
+  events: AuditEvent[];
 }
 
 export interface DiscoveredSMSSender {

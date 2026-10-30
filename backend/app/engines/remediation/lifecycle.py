@@ -77,10 +77,12 @@ PERMITTED_TRANSITIONS: Dict[ActionState, Set[ActionState]] = {
     ActionState.DISCOVERED: {
         ActionState.AWAITING_USER_REVIEW,
         ActionState.CONFIRMED_EXPOSURE,
+        ActionState.REQUEST_PREPARED,
         ActionState.REJECTED,
     },
     ActionState.AWAITING_USER_REVIEW: {
         ActionState.CONFIRMED_EXPOSURE,
+        ActionState.REQUEST_PREPARED,
         ActionState.REJECTED,
     },
     ActionState.CONFIRMED_EXPOSURE: {

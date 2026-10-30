@@ -147,6 +147,8 @@ export function App() {
           <RemediationHub
             currentIdentity={currentIdentity}
             selectedSourceId={selectedSourceId}
+            exposures={exposures}
+            onRefresh={() => refreshData()}
           />
         )}
 

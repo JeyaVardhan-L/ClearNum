@@ -163,6 +163,8 @@ class GenerateTemplateRequest(BaseModel):
     violator_number: Optional[str] = None
     incident_date: Optional[str] = None
     call_description: Optional[str] = None
+    exposure_id: Optional[str] = Field(default=None, description="Optional discovered exposure ID to bind notice to")
+    identity_hmac: Optional[str] = Field(default=None, description="Identity HMAC for exposure ownership validation")
 
 
 class GenerateTemplateResponse(BaseModel):
@@ -170,6 +172,87 @@ class GenerateTemplateResponse(BaseModel):
     title: str
     subject_line: str
     body_markdown: str
+    exposure_id: Optional[str] = None
+    target_url: Optional[str] = None
+    canonical_url: Optional[str] = None
+    source_id: Optional[str] = None
+    expected_response_date: Optional[str] = None
+    deadline_basis: Optional[str] = "NONE"
+    deadline_notes: Optional[str] = None
+    is_estimate: bool = True
+
+
+class PrepareRemediationRequest(BaseModel):
+    exposure_id: str = Field(..., description="Target exposure identifier")
+    identity_hmac: str = Field(..., description="Keyed identity HMAC for isolation")
+    request_type: str = Field(..., description="Legal basis or notice format (e.g. CCPA_DELETE, GDPR_ERASURE, DPDP_NOTICE, WEB_FORM)")
+    submission_channel: Optional[str] = Field(default="WEB_FORM", description="Expected channel (WEB_FORM, STATUTORY_EMAIL, etc.)")
+    recipient_name: Optional[str] = Field(default=None, description="Target company or privacy officer")
+    target_url: Optional[str] = Field(default=None, description="Specific URL being remediated")
+    notes: Optional[str] = Field(default=None, description="Optional draft generation notes")
+    expected_response_date: Optional[str] = Field(default=None, description="Estimated target resolution date (ISO)")
+    follow_up_date: Optional[str] = Field(default=None, description="Target user follow-up date (ISO)")
+    deadline_basis: Optional[str] = Field(default="NONE", description="STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, or NONE")
+
+
+class PrepareRemediationResponse(BaseModel):
+    success: bool
+    action_id: str
+    exposure_id: str
+    status: str = "REQUEST_PREPARED"
+    request_type: str
+    submission_channel: Optional[str] = None
+    submitted_at: Optional[str] = None
+    expected_response_date: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    deadline_basis: str = "NONE"
+    updated_at: str
+    message: str = "Request prepared locally. Not yet submitted to source."
+
+
+class SubmitRemediationRequest(BaseModel):
+    exposure_id: str = Field(..., description="Target exposure identifier")
+    identity_hmac: str = Field(..., description="Keyed identity HMAC for isolation")
+    submission_channel: str = Field(default="WEB_FORM", description="Channel used: WEB_FORM, STATUTORY_EMAIL, POSTAL_MAIL, TELECOM_SMS, etc.")
+    submission_ref: Optional[str] = Field(default=None, description="Ticket ID, confirmation number, or sent message ID")
+    notes: Optional[str] = Field(default=None, description="User notes on submission")
+    submitted_at: Optional[str] = Field(default=None, description="ISO timestamp of submission (defaults to now)")
+    expected_response_date: Optional[str] = Field(default=None, description="Target response date")
+    follow_up_date: Optional[str] = Field(default=None, description="Target follow-up inspection date")
+    deadline_basis: Optional[str] = Field(default="NONE", description="STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, or NONE")
+
+
+class SubmitRemediationResponse(BaseModel):
+    success: bool
+    action_id: str
+    exposure_id: str
+    status: str = "SUBMITTED"
+    submission_channel: str
+    submission_ref: Optional[str] = None
+    submitted_at: str
+    expected_response_date: Optional[str] = None
+    follow_up_date: Optional[str] = None
+    deadline_basis: str
+    updated_at: str
+    message: str = "Request marked as submitted externally. Audit event recorded."
+
+
+class CalculateDeadlineRequest(BaseModel):
+    request_type: str
+    jurisdiction: Optional[str] = "IN"
+    start_date: Optional[str] = None
+    custom_days: Optional[int] = None
+    user_basis: Optional[str] = None
+
+
+class CalculateDeadlineResponse(BaseModel):
+    days: int
+    expected_response_date: str
+    follow_up_date: str
+    deadline_basis: str
+    citation: str
+    is_estimate: bool
+    notes: str
 
 
 class RescanVerificationRequest(BaseModel):

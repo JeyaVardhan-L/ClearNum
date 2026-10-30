@@ -174,26 +174,36 @@ def init_db(db_path: Optional[Path] = None) -> None:
         pass
 
     # Ensure backward-compatible additive columns exist on remediation_actions
-    try:
-        cursor.execute("PRAGMA table_info(remediation_actions);")
-        existing_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in cursor.fetchall()}
-        new_columns = [
-            ("request_type", "TEXT"),
-            ("submission_channel", "TEXT"),
-            ("expected_response_date", "TEXT"),
-            ("follow_up_date", "TEXT"),
-            ("deadline_basis", "TEXT DEFAULT 'NONE'"),
-        ]
-        for col_name, col_def in new_columns:
-            if col_name not in existing_cols:
+    cursor.execute("PRAGMA table_info(remediation_actions);")
+    existing_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in cursor.fetchall()}
+    new_columns = [
+        ("request_type", "TEXT"),
+        ("submission_channel", "TEXT"),
+        ("expected_response_date", "TEXT"),
+        ("follow_up_date", "TEXT"),
+        ("deadline_basis", "TEXT DEFAULT 'NONE'"),
+    ]
+    for col_name, col_def in new_columns:
+        if col_name not in existing_cols:
+            try:
                 cursor.execute(f"ALTER TABLE remediation_actions ADD COLUMN {col_name} {col_def};")
-    except Exception:
-        pass
+            except sqlite3.OperationalError as e:
+                # Re-verify if column was added concurrently or already exists
+                cursor.execute("PRAGMA table_info(remediation_actions);")
+                check_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in cursor.fetchall()}
+                if col_name not in check_cols:
+                    raise RuntimeError(f"Database migration failed to add column '{col_name}': {e}") from e
 
-    try:
-        cursor.execute("UPDATE remediation_actions SET deadline_basis = 'NONE' WHERE deadline_basis IS NULL;")
-    except Exception:
-        pass
+    # Ensure deadline_basis default value for historical rows
+    cursor.execute("UPDATE remediation_actions SET deadline_basis = 'NONE' WHERE deadline_basis IS NULL;")
+
+    # Affirmative schema verification: ensure all required columns are present
+    cursor.execute("PRAGMA table_info(remediation_actions);")
+    verified_cols = {row["name"] if isinstance(row, sqlite3.Row) else row[1] for row in cursor.fetchall()}
+    required_cols = {"request_type", "submission_channel", "expected_response_date", "follow_up_date", "deadline_basis"}
+    missing_cols = required_cols - verified_cols
+    if missing_cols:
+        raise RuntimeError(f"Database migration verification failed. Missing columns on remediation_actions: {missing_cols}")
 
     conn.commit()
     conn.close()

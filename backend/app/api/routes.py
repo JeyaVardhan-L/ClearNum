@@ -4,7 +4,7 @@ import os
 import uuid
 from pathlib import Path
 from typing import List, Optional, Set, Dict, Tuple
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query, Header
 from urllib.parse import urlparse
 
 from backend.app.core.config import settings
@@ -38,6 +38,8 @@ from backend.app.engines.remediation import (
     ActionState,
     InvalidStateTransitionError,
     EVIDENCE_RULES,
+    calculate_remediation_deadline,
+    DeadlineInfo,
     generate_ccpa_opt_out,
     generate_gdpr_erasure,
     generate_tcpa_ftc_complaint,
@@ -75,6 +77,12 @@ from backend.app.api.schemas import (
     ProviderOutcomeItem,
     ManualDorkItem,
     TransitionActionRequest,
+    PrepareRemediationRequest,
+    PrepareRemediationResponse,
+    SubmitRemediationRequest,
+    SubmitRemediationResponse,
+    CalculateDeadlineRequest,
+    CalculateDeadlineResponse,
     AuditEventItem,
     RemediationHistoryResponse,
     GenerateTemplateRequest,
@@ -939,8 +947,13 @@ def transition_action_endpoint(req: TransitionActionRequest):
 @router.get("/remediation/history/{exposure_id}", response_model=RemediationHistoryResponse)
 def get_remediation_history_endpoint(
     exposure_id: str,
-    identity_hmac: str = Query(..., description="Keyed identity HMAC for authorization")
+    identity_hmac: Optional[str] = Query(None, description="Keyed identity HMAC for authorization"),
+    x_identity_hmac: Optional[str] = Header(None, alias="X-Identity-HMAC", description="Keyed identity HMAC header")
 ):
+    target_hmac = x_identity_hmac or identity_hmac
+    if not target_hmac:
+        raise HTTPException(status_code=400, detail="Missing identity authentication. Provide X-Identity-HMAC header or identity_hmac query parameter.")
+    identity_hmac = target_hmac
     """Returns chronological audit trail and request metadata for an exposure under strict identity isolation."""
     conn = get_db_connection()
     cursor = conn.cursor()
@@ -1019,13 +1032,38 @@ def get_remediation_history_endpoint(
 
 @router.post("/remediation/template", response_model=GenerateTemplateResponse)
 def generate_template_endpoint(req: GenerateTemplateRequest):
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    bound_canonical_url = None
+    bound_source_id = None
+    resolved_target_url = req.target_url
+
+    # If exposure_id provided, bind to exposure under strict identity validation
+    if req.exposure_id:
+        cursor.execute("SELECT id, identity_hmac, source_id, url, canonical_url FROM exposures WHERE id = ?", (req.exposure_id,))
+        exp_row = cursor.fetchone()
+        if not exp_row:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Exposure not found.")
+        if req.identity_hmac and exp_row["identity_hmac"] != req.identity_hmac:
+            conn.close()
+            raise HTTPException(status_code=404, detail="Exposure not found.")
+        
+        bound_canonical_url = exp_row["canonical_url"] or exp_row["url"]
+        bound_source_id = exp_row["source_id"]
+        if not resolved_target_url:
+            resolved_target_url = bound_canonical_url
+
+    conn.close()
+
     norm = parse_and_normalize(req.phone_number, req.default_region)
     t_type = req.template_type.upper()
 
     if t_type in ("CCPA_DELETE", "CCPA_DELETION"):
-        tpl = generate_ccpa_opt_out(norm, req.recipient_name or "Data Broker Privacy Team", req.target_url)
+        tpl = generate_ccpa_opt_out(norm, req.recipient_name or "Data Broker Privacy Team", resolved_target_url)
     elif t_type in ("GDPR_ERASURE", "GDPR_DELETE"):
-        tpl = generate_gdpr_erasure(norm, req.recipient_name or "Data Protection Officer", req.target_url)
+        tpl = generate_gdpr_erasure(norm, req.recipient_name or "Data Protection Officer", resolved_target_url)
     elif t_type in ("TCPA_COMPLAINT", "TCPA_REVOCATION"):
         tpl = generate_tcpa_ftc_complaint(
             norm,
@@ -1046,16 +1084,293 @@ def generate_template_endpoint(req: GenerateTemplateRequest):
         tpl = generate_dpdp_act_notice(
             norm,
             req.recipient_name or "Grievance Officer",
-            target_url=req.target_url,
+            target_url=resolved_target_url,
         )
     else:
         raise HTTPException(status_code=400, detail=f"Unknown template type: {req.template_type}")
+
+    # Compute deadline recommendation
+    deadline_calc = calculate_remediation_deadline(t_type, req.default_region)
 
     return GenerateTemplateResponse(
         template_type=tpl.template_type,
         title=tpl.title,
         subject_line=tpl.subject_line,
         body_markdown=tpl.body_markdown,
+        exposure_id=req.exposure_id,
+        target_url=resolved_target_url,
+        canonical_url=bound_canonical_url,
+        source_id=bound_source_id,
+        expected_response_date=deadline_calc.expected_response_date,
+        deadline_basis=deadline_calc.deadline_basis,
+        deadline_notes=deadline_calc.notes,
+        is_estimate=deadline_calc.is_estimate,
+    )
+
+
+@router.post("/remediation/prepare", response_model=PrepareRemediationResponse)
+def prepare_remediation_request_endpoint(req: PrepareRemediationRequest):
+    """Saves a generated notice as a prepared remediation request bound to an exposure.
+    Sets status to REQUEST_PREPARED. submitted_at is strictly kept NULL.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Identity Isolation & Exposure Validation
+    cursor.execute("SELECT id, identity_hmac, source_id, url, canonical_url FROM exposures WHERE id = ?", (req.exposure_id,))
+    exp_row = cursor.fetchone()
+    if not exp_row or exp_row["identity_hmac"] != req.identity_hmac:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Exposure not found.")
+
+    # 2. Validate deadline_basis if supplied
+    deadline_basis = (req.deadline_basis or "NONE").upper().strip()
+    if deadline_basis not in ("STATUTORY", "SOURCE_ESTIMATE", "USER_DEFINED", "NONE"):
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid deadline_basis. Must be one of: STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, NONE"
+        )
+
+    now_iso = utc_now_iso()
+    clean_notes = redact_text(req.notes) if req.notes else None
+    target_official_url = req.target_url or exp_row["canonical_url"] or exp_row["url"]
+    submission_channel = req.submission_channel or "WEB_FORM"
+
+    # Compute default deadline if not provided
+    exp_date = req.expected_response_date
+    follow_date = req.follow_up_date
+    basis = deadline_basis
+    if not exp_date or basis == "NONE":
+        calc = calculate_remediation_deadline(req.request_type, "IN" if exp_row["source_id"].endswith(("_in", "india")) else "US")
+        if not exp_date:
+            exp_date = calc.expected_response_date
+        if not follow_date:
+            follow_date = calc.follow_up_date
+        if basis == "NONE":
+            basis = calc.deadline_basis
+
+    # 3. Check for existing action row (ensure idempotency, prevent duplicate rows)
+    cursor.execute("""SELECT id, status, request_type, submission_channel, notes, expected_response_date, follow_up_date, deadline_basis
+        FROM remediation_actions
+        WHERE exposure_id = ? AND identity_hmac = ?""", (req.exposure_id, req.identity_hmac))
+    act_row = cursor.fetchone()
+
+    if not act_row:
+        action_id = str(uuid.uuid4())
+        current_status = "DISCOVERED"
+        cursor.execute("""INSERT INTO remediation_actions (
+                id, exposure_id, identity_hmac, source_id, status, official_url,
+                notes, submitted_at, request_type, submission_channel,
+                expected_response_date, follow_up_date, deadline_basis, updated_at
+            ) VALUES (?, ?, ?, ?, 'REQUEST_PREPARED', ?, ?, NULL, ?, ?, ?, ?, ?, ?)""", (
+            action_id,
+            req.exposure_id,
+            req.identity_hmac,
+            exp_row["source_id"],
+            target_official_url,
+            clean_notes or f"Prepared {req.request_type} draft notice locally.",
+            req.request_type,
+            submission_channel,
+            exp_date,
+            follow_date,
+            basis,
+            now_iso,
+        ))
+    else:
+        action_id = act_row["id"]
+        current_status = act_row["status"]
+
+        # Validate transition to REQUEST_PREPARED
+        try:
+            validate_transition(current_status, "REQUEST_PREPARED")
+        except InvalidStateTransitionError as e:
+            conn.close()
+            raise HTTPException(status_code=400, detail=str(e))
+
+        cursor.execute("""UPDATE remediation_actions
+            SET status = 'REQUEST_PREPARED',
+                request_type = ?,
+                submission_channel = ?,
+                official_url = COALESCE(?, official_url),
+                notes = COALESCE(?, notes),
+                submitted_at = NULL,
+                expected_response_date = COALESCE(?, expected_response_date),
+                follow_up_date = COALESCE(?, follow_up_date),
+                deadline_basis = ?,
+                updated_at = ?
+            WHERE id = ?""", (
+            req.request_type,
+            submission_channel,
+            target_official_url,
+            clean_notes,
+            exp_date,
+            follow_date,
+            basis,
+            now_iso,
+            action_id,
+        ))
+
+    # Append immutable audit entry
+    audit_id = str(uuid.uuid4())
+    ev_notes = clean_notes or f"Generated {req.request_type} notice locally. Unsubmitted."
+    cursor.execute("""INSERT INTO action_audit_log (
+            id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at
+        ) VALUES (?, ?, ?, ?, 'REQUEST_PREPARED', 'DRAFT_GENERATION', ?, ?)""", (
+        audit_id,
+        action_id,
+        req.identity_hmac,
+        current_status,
+        redact_text(ev_notes),
+        now_iso,
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return PrepareRemediationResponse(
+        success=True,
+        action_id=action_id,
+        exposure_id=req.exposure_id,
+        status="REQUEST_PREPARED",
+        request_type=req.request_type,
+        submission_channel=submission_channel,
+        submitted_at=None,
+        expected_response_date=exp_date,
+        follow_up_date=follow_date,
+        deadline_basis=basis,
+        updated_at=now_iso,
+        message="Request prepared locally. Not yet submitted to source.",
+    )
+
+
+@router.post("/remediation/submit", response_model=SubmitRemediationResponse)
+def submit_remediation_request_endpoint(req: SubmitRemediationRequest):
+    """Explicit user confirmation that a remediation request was dispatched externally.
+    Transitions status to SUBMITTED and affirmatively records submitted_at timestamp.
+    """
+    conn = get_db_connection()
+    cursor = conn.cursor()
+
+    # 1. Identity Isolation & Exposure Validation
+    cursor.execute("SELECT id, identity_hmac FROM exposures WHERE id = ?", (req.exposure_id,))
+    exp_row = cursor.fetchone()
+    if not exp_row or exp_row["identity_hmac"] != req.identity_hmac:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Exposure not found.")
+
+    # 2. Check remediation action exists
+    cursor.execute("""SELECT id, status, request_type, submission_channel, notes, submitted_at,
+               expected_response_date, follow_up_date, deadline_basis
+        FROM remediation_actions
+        WHERE exposure_id = ? AND identity_hmac = ?""", (req.exposure_id, req.identity_hmac))
+    act_row = cursor.fetchone()
+    if not act_row:
+        conn.close()
+        raise HTTPException(status_code=404, detail="Remediation action not found. Prepare notice before submitting.")
+
+    current_status = act_row["status"]
+    action_id = act_row["id"]
+
+    # 3. Validate transition to SUBMITTED
+    try:
+        validate_transition(current_status, "SUBMITTED")
+    except InvalidStateTransitionError as e:
+        conn.close()
+        raise HTTPException(status_code=400, detail=str(e))
+
+    # 4. Validate deadline_basis
+    deadline_basis = (req.deadline_basis or act_row["deadline_basis"] or "NONE").upper().strip()
+    if deadline_basis not in ("STATUTORY", "SOURCE_ESTIMATE", "USER_DEFINED", "NONE"):
+        conn.close()
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid deadline_basis. Must be one of: STATUTORY, SOURCE_ESTIMATE, USER_DEFINED, NONE"
+        )
+
+    now_iso = utc_now_iso()
+    submitted_at_ts = req.submitted_at or now_iso
+    clean_notes = redact_text(req.notes) if req.notes else None
+    clean_ref = redact_text(req.submission_ref) if req.submission_ref else None
+
+    new_channel = req.submission_channel or act_row["submission_channel"] or "WEB_FORM"
+    new_exp_date = req.expected_response_date or act_row["expected_response_date"]
+    new_follow_date = req.follow_up_date or act_row["follow_up_date"]
+
+    cursor.execute("""UPDATE remediation_actions
+        SET status = 'SUBMITTED',
+            submission_channel = ?,
+            submission_ref = COALESCE(?, submission_ref),
+            submitted_at = ?,
+            expected_response_date = COALESCE(?, expected_response_date),
+            follow_up_date = COALESCE(?, follow_up_date),
+            deadline_basis = ?,
+            notes = COALESCE(?, notes),
+            updated_at = ?
+        WHERE id = ?""", (
+        new_channel,
+        clean_ref,
+        submitted_at_ts,
+        new_exp_date,
+        new_follow_date,
+        deadline_basis,
+        clean_notes,
+        now_iso,
+        action_id,
+    ))
+
+    # Append immutable audit entry
+    audit_id = str(uuid.uuid4())
+    ref_desc = f" (Ref: {clean_ref})" if clean_ref else ""
+    ev_notes = clean_notes or f"Dispatched via {new_channel}{ref_desc}"
+    cursor.execute("""INSERT INTO action_audit_log (
+            id, action_id, identity_hmac, from_state, to_state, evidence_type, evidence_notes, created_at
+        ) VALUES (?, ?, ?, ?, 'SUBMITTED', 'SUBMISSION_RECORD', ?, ?)""", (
+        audit_id,
+        action_id,
+        req.identity_hmac,
+        current_status,
+        redact_text(ev_notes),
+        now_iso,
+    ))
+
+    conn.commit()
+    conn.close()
+
+    return SubmitRemediationResponse(
+        success=True,
+        action_id=action_id,
+        exposure_id=req.exposure_id,
+        status="SUBMITTED",
+        submission_channel=new_channel,
+        submission_ref=clean_ref,
+        submitted_at=submitted_at_ts,
+        expected_response_date=new_exp_date,
+        follow_up_date=new_follow_date,
+        deadline_basis=deadline_basis,
+        updated_at=now_iso,
+        message="Request marked as submitted externally. Audit event recorded.",
+    )
+
+
+@router.post("/remediation/calculate-deadline", response_model=CalculateDeadlineResponse)
+def calculate_deadline_endpoint(req: CalculateDeadlineRequest):
+    """Calculates response and follow-up deadlines for a request type without persisting."""
+    calc = calculate_remediation_deadline(
+        request_type=req.request_type,
+        jurisdiction=req.jurisdiction,
+        start_date=req.start_date,
+        custom_days=req.custom_days,
+        user_basis=req.user_basis,
+    )
+    return CalculateDeadlineResponse(
+        days=calc.days,
+        expected_response_date=calc.expected_response_date,
+        follow_up_date=calc.follow_up_date,
+        deadline_basis=calc.deadline_basis,
+        citation=calc.citation,
+        is_estimate=calc.is_estimate,
+        notes=calc.notes,
     )
 
 

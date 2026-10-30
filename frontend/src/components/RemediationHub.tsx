@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import {
   FileText,
   ExternalLink,
@@ -14,18 +14,33 @@ import {
   BookOpen,
   Sparkles,
   HelpCircle,
+  Save,
+  Send,
+  ShieldAlert,
+  Link as LinkIcon,
+  CheckCircle2,
 } from "lucide-react";
-import type { RemediationSource, PhoneParseResult, GeneratedTemplate } from "../types";
-import { getRemediationSources, generateLegalTemplate } from "../api";
+import type { RemediationSource, PhoneParseResult, GeneratedTemplate, DiscoveredExposure } from "../types";
+import {
+  getRemediationSources,
+  generateLegalTemplate,
+  prepareRemediationRequest,
+  submitRemediationRequest,
+  getExposures,
+} from "../api";
 
 interface RemediationHubProps {
   currentIdentity: PhoneParseResult | null;
   selectedSourceId?: string;
+  exposures?: DiscoveredExposure[];
+  onRefresh?: () => void;
 }
 
 export const RemediationHub: React.FC<RemediationHubProps> = ({
   currentIdentity,
   selectedSourceId,
+  exposures = [],
+  onRefresh,
 }) => {
   const [sources, setSources] = useState<RemediationSource[]>([]);
   const [loadingSources, setLoadingSources] = useState(true);
@@ -34,7 +49,10 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
   const [capabilityFilter, setCapabilityFilter] = useState("ALL");
   const [activeTab, setActiveTab] = useState<"directory" | "templates" | "searchengines">("directory");
 
-  // Template state
+  // Exposure binding & template state
+  const [fetchedExposures, setFetchedExposures] = useState<DiscoveredExposure[]>([]);
+  const availableExposures = exposures.length > 0 ? exposures : fetchedExposures;
+  const [selectedExposureId, setSelectedExposureId] = useState<string>("");
   const [templateType, setTemplateType] = useState("CCPA_DELETE");
   const [recipientName, setRecipientName] = useState("Data Broker Privacy & Legal Team");
   const [targetUrl, setTargetUrl] = useState("");
@@ -45,6 +63,75 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
   const [copiedTemplate, setCopiedTemplate] = useState(false);
   const [copiedSubject, setCopiedSubject] = useState(false);
   const [copiedPreFill, setCopiedPreFill] = useState<string | null>(null);
+
+  // Preparation & submission lifecycle state
+  const [currentActionStatus, setCurrentActionStatus] = useState<string | null>(null);
+  const [isPreparing, setIsPreparing] = useState(false);
+  const [prepareSuccessMessage, setPrepareSuccessMessage] = useState<string | null>(null);
+  const [showSubmitSection, setShowSubmitSection] = useState(false);
+  const [submissionChannel, setSubmissionChannel] = useState("WEB_FORM");
+  const [submissionRef, setSubmissionRef] = useState("");
+  const [submissionNotes, setSubmissionNotes] = useState("");
+  const [customResponseDate, setCustomResponseDate] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(null);
+
+  const handleSelectExposure = React.useCallback((expId: string, currentList: DiscoveredExposure[] = availableExposures) => {
+    setSelectedExposureId(expId);
+    setPrepareSuccessMessage(null);
+    setSubmitSuccessMessage(null);
+    setShowSubmitSection(false);
+
+    if (!expId) {
+      setCurrentActionStatus(null);
+      return;
+    }
+    const exp = currentList.find((e) => e.id === expId);
+    if (!exp) return;
+
+    setCurrentActionStatus(exp.remediation_status || "DISCOVERED");
+    setTargetUrl(exp.canonical_url || exp.url);
+    setRecipientName(`${exp.domain} Privacy Team`);
+
+    // Auto-suggest template based on source / domain
+    if (exp.source_id.includes("_in") || exp.domain.endsWith(".in")) {
+      setTemplateType("DPDP_ACT_2023");
+    } else if (exp.source_id.includes("_us") || exp.domain.endsWith(".com")) {
+      setTemplateType("CCPA_DELETE");
+    } else if (
+      exp.source_id.includes("_eu") ||
+      exp.source_id.includes("_uk") ||
+      exp.domain.endsWith(".uk") ||
+      exp.domain.endsWith(".eu")
+    ) {
+      setTemplateType("GDPR_ERASURE");
+    }
+  }, [availableExposures]);
+
+  // Fetch exposures if not passed as props
+  useEffect(() => {
+    if (exposures.length === 0 && currentIdentity?.hmac_id) {
+      getExposures(currentIdentity.hmac_id)
+        .then((exps) => setFetchedExposures(exps))
+        .catch(() => {});
+    }
+  }, [exposures.length, currentIdentity?.hmac_id]);
+
+  // Handle selectedSourceId navigation from ExposuresView
+  const lastNavigatedSourceRef = useRef<string | undefined>(undefined);
+  useEffect(() => {
+    if (selectedSourceId && selectedSourceId !== lastNavigatedSourceRef.current && availableExposures.length > 0) {
+      lastNavigatedSourceRef.current = selectedSourceId;
+      const match = availableExposures.find((e) => e.source_id === selectedSourceId);
+      if (match) {
+        const timer = setTimeout(() => {
+          handleSelectExposure(match.id, availableExposures);
+          setActiveTab("templates");
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    }
+  }, [selectedSourceId, availableExposures, handleSelectExposure]);
 
   useEffect(() => {
     async function loadSources() {
@@ -88,9 +175,16 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
         regionVal,
         recipientName,
         targetUrl,
-        violatorNumber
+        violatorNumber,
+        undefined,
+        undefined,
+        selectedExposureId || undefined,
+        currentIdentity?.hmac_id || undefined
       );
       setGeneratedTemplate(res);
+      if (res.expected_response_date) {
+        setCustomResponseDate(res.expected_response_date);
+      }
     } catch (err: any) {
       setTemplateError(`Template generation failed: ${err.message}`);
     } finally {
@@ -108,6 +202,70 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
       setTimeout(() => setCopiedSubject(false), 2000);
     }
   };
+
+  const handleSavePrepared = async () => {
+    if (!selectedExposureId || !currentIdentity?.hmac_id) {
+      setTemplateError("Select a discovered exposure to bind this prepared notice.");
+      return;
+    }
+    setIsPreparing(true);
+    setTemplateError(null);
+    setPrepareSuccessMessage(null);
+
+    try {
+      await prepareRemediationRequest({
+        exposureId: selectedExposureId,
+        identityHmac: currentIdentity.hmac_id,
+        requestType: templateType,
+        submissionChannel: "WEB_FORM",
+        recipientName,
+        targetUrl,
+        expectedResponseDate: customResponseDate || generatedTemplate?.expected_response_date,
+        deadlineBasis: generatedTemplate?.deadline_basis || "NONE",
+        notes: `Notice prepared locally for ${recipientName}`,
+      });
+      setCurrentActionStatus("REQUEST_PREPARED");
+      setPrepareSuccessMessage("Notice saved as Prepared Request locally. Not submitted to external broker.");
+      onRefresh?.();
+    } catch (err: any) {
+      setTemplateError(`Failed to save prepared request: ${err.message}`);
+    } finally {
+      setIsPreparing(false);
+    }
+  };
+
+  const handleConfirmSubmission = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedExposureId || !currentIdentity?.hmac_id) {
+      setTemplateError("Select a discovered exposure to record external submission.");
+      return;
+    }
+    setIsSubmitting(true);
+    setTemplateError(null);
+    setSubmitSuccessMessage(null);
+
+    try {
+      const res = await submitRemediationRequest({
+        exposureId: selectedExposureId,
+        identityHmac: currentIdentity.hmac_id,
+        submissionChannel,
+        submissionRef: submissionRef.trim() || undefined,
+        notes: submissionNotes.trim() || undefined,
+        expectedResponseDate: customResponseDate || generatedTemplate?.expected_response_date,
+        deadlineBasis: generatedTemplate?.deadline_basis || "NONE",
+      });
+      setCurrentActionStatus("SUBMITTED");
+      setShowSubmitSection(false);
+      setSubmitSuccessMessage(`Submission recorded via ${res.submission_channel}. Audit event created.`);
+      onRefresh?.();
+    } catch (err: any) {
+      setTemplateError(`Failed to record submission: ${err.message}`);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const selectedExposure = availableExposures.find((e) => e.id === selectedExposureId);
 
   const handleDownloadMarkdown = () => {
     if (!generatedTemplate) return;
@@ -392,6 +550,51 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                 </div>
               )}
 
+              {/* Target Exposure Association Selector */}
+              <div>
+                <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider flex items-center justify-between">
+                  <span>Target Exposure Association</span>
+                  {selectedExposureId && (
+                    <span className="text-[10px] text-emerald-400 font-mono">Bound to Exposure</span>
+                  )}
+                </label>
+                <select
+                  value={selectedExposureId}
+                  onChange={(e) => handleSelectExposure(e.target.value)}
+                  className="input-field text-xs font-mono"
+                >
+                  <option value="">-- Generic Notice (No specific exposure bound) --</option>
+                  {availableExposures.map((exp) => (
+                    <option key={exp.id} value={exp.id}>
+                      {exp.domain} ({exp.source_id}) — {exp.url.substring(0, 36)}...
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Selected Exposure Context Summary */}
+              {selectedExposure && (
+                <div className="p-3 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-app)] space-y-1 text-xs">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-[var(--text-main)] flex items-center gap-1.5">
+                      <LinkIcon className="w-3.5 h-3.5 text-cyan-400" />
+                      {selectedExposure.domain}
+                    </span>
+                    <span className="status-pill pill-pixel-purple text-[9px]">
+                      {currentActionStatus || selectedExposure.remediation_status || "DISCOVERED"}
+                    </span>
+                  </div>
+                  <div className="text-[11px] font-mono text-[var(--text-muted)] truncate" title={selectedExposure.canonical_url || selectedExposure.url}>
+                    {selectedExposure.canonical_url || selectedExposure.url}
+                  </div>
+                  <div className="flex items-center gap-2 pt-0.5 text-[10px] text-[var(--text-dim)]">
+                    <span>Source: <strong>{selectedExposure.source_id}</strong></span>
+                    <span>•</span>
+                    <span>Match: <strong>{selectedExposure.match_type}</strong></span>
+                  </div>
+                </div>
+              )}
+
               <form onSubmit={handleGenerateTemplate} className="space-y-3.5">
                 <div>
                   <label className="text-xs font-semibold text-[var(--text-muted)] block mb-1 uppercase tracking-wider">
@@ -548,6 +751,165 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
                     )}
                   </button>
                 </div>
+
+                {/* Feedback Alerts */}
+                {prepareSuccessMessage && (
+                  <div className="p-3 rounded-md border border-amber-500/40 bg-amber-950/20 text-xs text-amber-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-amber-400" />
+                    <span>{prepareSuccessMessage}</span>
+                  </div>
+                )}
+                {submitSuccessMessage && (
+                  <div className="p-3 rounded-md border border-emerald-500/40 bg-emerald-950/20 text-xs text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-400" />
+                    <span>{submitSuccessMessage}</span>
+                  </div>
+                )}
+
+                {/* Local-Only Privacy Invariant Banner */}
+                <div className="p-3 rounded-lg border border-slate-800 bg-[#0c1424] text-[11px] text-[var(--text-muted)] space-y-1">
+                  <div className="font-semibold text-cyan-400 flex items-center gap-1.5">
+                    <ShieldAlert className="w-3.5 h-3.5 shrink-0" />
+                    <span>Local-Only Privacy Invariant</span>
+                  </div>
+                  <p className="leading-relaxed">
+                    ClearNum never contacts external data brokers or dispatches requests automatically. Copy or download your notice, submit it via the broker's official portal, and record submission below.
+                  </p>
+                </div>
+
+                {/* Exposure-Bound Remediation Actions Bar */}
+                {selectedExposureId && (
+                  <div className="p-3.5 rounded-lg border border-[var(--border-subtle)] bg-[var(--bg-app)] space-y-3">
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3">
+                      <div className="text-xs">
+                        <span className="text-[var(--text-dim)] font-semibold uppercase tracking-wider mr-2">
+                          Status:
+                        </span>
+                        <span className="status-pill pill-pixel-cyan text-[10px] font-bold">
+                          {currentActionStatus || "DISCOVERED"}
+                        </span>
+                        {generatedTemplate.deadline_basis && generatedTemplate.deadline_basis !== "NONE" && (
+                          <span className="text-[10px] text-[var(--text-dim)] block sm:inline sm:ml-2 mt-1 sm:mt-0">
+                            Target: <strong>{customResponseDate || generatedTemplate.expected_response_date}</strong> ({generatedTemplate.deadline_basis})
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={handleSavePrepared}
+                          disabled={isPreparing}
+                          className="btn btn-secondary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                          title="Save notice draft locally as a prepared remediation request"
+                        >
+                          <Save className="w-3 h-3 text-amber-400" />
+                          <span>{isPreparing ? "Saving..." : "Save as Prepared Request"}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowSubmitSection(!showSubmitSection)}
+                          className="btn btn-primary text-xs py-1.5 px-3 flex items-center gap-1.5"
+                          title="Record that this notice has been submitted externally"
+                        >
+                          <Send className="w-3 h-3" />
+                          <span>{showSubmitSection ? "Cancel Submission" : "Mark as Submitted"}</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Inline Mark as Submitted Form */}
+                    {showSubmitSection && (
+                      <form onSubmit={handleConfirmSubmission} className="pt-3 border-t border-[var(--border-subtle)] space-y-3">
+                        <div className="text-xs font-bold text-[var(--text-main)] flex items-center gap-1.5">
+                          <Send className="w-3.5 h-3.5 text-[var(--pixel-green)]" />
+                          <span>Confirm External Submission Details</span>
+                        </div>
+                        <p className="text-[11px] text-[var(--text-muted)] leading-relaxed">
+                          Confirm that you have dispatched this notice to the data broker or platform. This transitions the lifecycle state to <strong>SUBMITTED</strong> and records an immutable forensic audit event.
+                        </p>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-muted)] block mb-1">
+                              Submission Channel
+                            </label>
+                            <select
+                              value={submissionChannel}
+                              onChange={(e) => setSubmissionChannel(e.target.value)}
+                              className="input-field text-xs"
+                            >
+                              <option value="WEB_FORM">Web Portal / Opt-Out Form</option>
+                              <option value="STATUTORY_EMAIL">Statutory Email (DPO / Grievance)</option>
+                              <option value="POSTAL_MAIL">Postal / Registered Mail</option>
+                              <option value="TELECOM_SMS">Telecom SMS / TRAI 1909</option>
+                              <option value="CARRIER_7726">Carrier 7726 Spam Forwarding</option>
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-muted)] block mb-1">
+                              Reference / Ticket ID (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={submissionRef}
+                              onChange={(e) => setSubmissionRef(e.target.value)}
+                              className="input-field text-xs font-mono"
+                              placeholder="e.g. TICKET-49210 or Email ID"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-muted)] block mb-1">
+                              Expected Response Date
+                            </label>
+                            <input
+                              type="date"
+                              value={customResponseDate}
+                              onChange={(e) => setCustomResponseDate(e.target.value)}
+                              className="input-field text-xs font-mono"
+                            />
+                          </div>
+
+                          <div>
+                            <label className="text-[11px] font-semibold text-[var(--text-muted)] block mb-1">
+                              Submission Notes (Optional)
+                            </label>
+                            <input
+                              type="text"
+                              value={submissionNotes}
+                              onChange={(e) => setSubmissionNotes(e.target.value)}
+                              className="input-field text-xs"
+                              placeholder="e.g. Submitted via online form with confirmation screenshot"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center justify-end gap-2 pt-1">
+                          <button
+                            type="button"
+                            onClick={() => setShowSubmitSection(false)}
+                            className="btn btn-secondary text-xs py-1.5 px-3"
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            type="submit"
+                            disabled={isSubmitting}
+                            className="btn btn-primary text-xs py-1.5 px-4 flex items-center gap-1.5"
+                          >
+                            <Check className="w-3.5 h-3.5" />
+                            <span>{isSubmitting ? "Recording Submission..." : "Confirm & Record Submission"}</span>
+                          </button>
+                        </div>
+                      </form>
+                    )}
+                  </div>
+                )}
 
                 {/* Formatted body display */}
                 <div className="bg-[var(--bg-app)] p-4 rounded-lg border border-[var(--border-subtle)] font-mono text-xs text-[var(--text-main)] whitespace-pre-wrap max-h-[500px] overflow-y-auto leading-relaxed">
