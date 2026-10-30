@@ -24,6 +24,8 @@ class MatchResult:
     confidence_explanation: str = ""
     is_example_or_test: bool = False
     evidence_origin: str = "UNKNOWN"  # "SEARCH_SNIPPET", "FETCHED_PAGE", "ARCHIVED_SNAPSHOT", "UNKNOWN"
+    matched_tier: str = "NONE"  # "EXACT_CANONICAL", "SPACED_NATIONAL", "UNFORMATTED_DIGITS", "LOCAL_FRAGMENT", "NONE"
+    verification_requirement: str = ""
 
 
 # Regexes to detect common false positive sequences (dates, UUIDs, ISBNs, tracking numbers, transaction IDs)
@@ -47,6 +49,55 @@ TELEPHONE_CONTEXT_KEYWORDS = re.compile(
     re.IGNORECASE,
 )
 
+
+
+
+def format_evidence_requirement(evidence_origin: str) -> str:
+    """Returns honest, explicit verification limitations and requirement based on evidence origin."""
+    if evidence_origin == "SEARCH_SNIPPET":
+        return "Match observed in search snippet only; live web page body has not been inspected. Direct URL verification is required to confirm active exposure."
+    elif evidence_origin == "FETCHED_PAGE":
+        return "Direct live page fetch inspected. Confirms matching text is present in current web page body."
+    elif evidence_origin == "ARCHIVED_SNAPSHOT":
+        return "Historical archive snapshot (Wayback Machine). Live page re-verification is required to confirm whether exposure persists today."
+    else:
+        return "Evidence origin unverified; direct live page inspection is required to confirm active exposure."
+
+
+def build_calibrated_explanation(
+    matched_tier: str,
+    match_classification: str,
+    evidence_origin: str,
+    is_example_or_test: bool = False,
+    has_tel_context: bool = False,
+    matched_text: str = "",
+) -> Tuple[str, str]:
+    """Generates calibrated, honest confidence explanation and explicit verification requirement."""
+    origin_req = format_evidence_requirement(evidence_origin)
+
+    if match_classification == "CONFIRMED_MATCH":
+        core = "Exact canonical telephone representation matched in plausible contact context."
+    elif match_classification == "POSSIBLE_MATCH":
+        if matched_tier == "SPACED_NATIONAL":
+            core = "Spaced national format matching telephone numbering plan, without full international canonical prefix."
+        else:
+            core = "Continuous digit sequence appearing alongside explicit telephone/contact keywords."
+    elif match_classification == "INCIDENTAL_MENTION":
+        if is_example_or_test:
+            core = "Exact or formatted telephone sequence appears within documentation, test fixtures, or sample context."
+        else:
+            core = "Continuous digit sequence matching telephone length without explicit contact label."
+    elif match_classification == "INCONCLUSIVE":
+        core = "Ambiguous local digit sequence lacking area code or explicit telephone designation."
+    elif match_classification == "FALSE_POSITIVE":
+        core = "Candidate sequence rejected: identified as invoice ID, transaction reference, date, ISBN, or UUID structure."
+        return core, "Candidate discarded as false positive; no exposure created."
+    else:
+        core = "No matching telephone candidate detected in provided text."
+        return core, "No verification possible."
+
+    full_explanation = f"{core} {origin_req}"
+    return full_explanation, origin_req
 
 def sanitize_html_to_text(html_content: str) -> str:
     """Safely extracts clean plain text from HTML, stripping all script,
@@ -97,7 +148,9 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
     """
     clean_text = sanitize_html_to_text(text)
     if not clean_text or not phone.is_possible:
-        return MatchResult(evidence_origin=evidence_origin, 
+        conf_expl, verif_req = build_calibrated_explanation("NONE", "INCONCLUSIVE", evidence_origin, matched_text="")
+        return MatchResult(
+            evidence_origin=evidence_origin,
             matched=False,
             match_type="NONE",
             confidence=0.0,
@@ -105,6 +158,8 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
             snippet="",
             match_classification="INCONCLUSIVE",
             confidence_explanation="No telephone candidate found or phone number is invalid.",
+            matched_tier="NONE",
+            verification_requirement=verif_req,
         )
 
     is_test_number = is_nanp_reserved_example(phone) or bool(OBVIOUS_TEST_DIGITS.search(phone.digits_only or ""))
@@ -140,7 +195,9 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
                 # Check if the match is specifically inside transaction or date
                 match_region = clean_text[max(0, idx - 15) : min(len(clean_text), idx + len(candidate) + 15)]
                 if TRANSACTION_PATTERN.search(match_region):
-                    return MatchResult(evidence_origin=evidence_origin, 
+                    conf_expl, verif_req = build_calibrated_explanation("NONE", "FALSE_POSITIVE", evidence_origin, matched_text=candidate)
+                    return MatchResult(
+                        evidence_origin=evidence_origin,
                         matched=False,
                         match_type="FALSE_POSITIVE",
                         confidence=0.0,
@@ -149,30 +206,44 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
                         match_classification="FALSE_POSITIVE",
                         confidence_explanation="Candidate sequence is part of an order, invoice, or transaction identifier.",
                         is_example_or_test=False,
+                        matched_tier="NONE",
+                        verification_requirement=verif_req,
                     )
 
             has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
             if has_example_marker:
-                return MatchResult(evidence_origin=evidence_origin, 
+                conf_expl, verif_req = build_calibrated_explanation(
+                    "EXACT_CANONICAL", "INCIDENTAL_MENTION", evidence_origin, is_example_or_test=True, matched_text=candidate
+                )
+                return MatchResult(
+                    evidence_origin=evidence_origin,
                     matched=True,
                     match_type="EXACT",
-                    confidence=0.90,
+                    confidence=0.70,
                     matched_text=candidate,
                     snippet=snippet,
-                    match_classification="POSSIBLE_MATCH",
-                    confidence_explanation="Exact representation matched within a recognized documentation or test example context.",
+                    match_classification="INCIDENTAL_MENTION",
+                    confidence_explanation=conf_expl,
                     is_example_or_test=True,
+                    matched_tier="EXACT_CANONICAL",
+                    verification_requirement=verif_req,
                 )
 
-            return MatchResult(evidence_origin=evidence_origin, 
+            conf_expl, verif_req = build_calibrated_explanation(
+                "EXACT_CANONICAL", "CONFIRMED_MATCH", evidence_origin, is_example_or_test=False, matched_text=candidate
+            )
+            return MatchResult(
+                evidence_origin=evidence_origin,
                 matched=True,
                 match_type="EXACT",
                 confidence=1.0,
                 matched_text=candidate,
                 snippet=snippet,
                 match_classification="CONFIRMED_MATCH",
-                confidence_explanation="Exact canonical representation bounded by non-digit delimiters with verified formatting.",
+                confidence_explanation=conf_expl,
                 is_example_or_test=False,
+                matched_tier="EXACT_CANONICAL",
+                verification_requirement=verif_req,
             )
 
     # 2. Check for spaced or unpunctuated format
@@ -181,20 +252,35 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
         idx = clean_text.find(spaced_candidate)
         snippet = extract_context_snippet(clean_text, idx, idx + len(spaced_candidate))
         has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
-        return MatchResult(evidence_origin=evidence_origin, 
+        match_class = "INCIDENTAL_MENTION" if has_example_marker else "POSSIBLE_MATCH"
+        conf = 0.60 if has_example_marker else 0.85
+        conf_expl, verif_req = build_calibrated_explanation(
+            "SPACED_NATIONAL", match_class, evidence_origin, is_example_or_test=has_example_marker, matched_text=spaced_candidate
+        )
+        return MatchResult(
+            evidence_origin=evidence_origin,
             matched=True,
             match_type="PROBABLE",
-            confidence=0.85 if not has_example_marker else 0.70,
+            confidence=conf,
             matched_text=spaced_candidate,
             snippet=snippet,
-            match_classification="POSSIBLE_MATCH",
-            confidence_explanation="Spaced national format matching local telephone numbering plan.",
+            match_classification=match_class,
+            confidence_explanation=conf_expl,
             is_example_or_test=has_example_marker,
+            matched_tier="SPACED_NATIONAL",
+            verification_requirement=verif_req,
         )
 
-    # 3. Check for digits only sequence bounded by non-digit boundaries
+    # 3. Check for digits only sequence bounded by non-digit boundaries (both full phone digits and national 10-digit number)
+    digit_candidates = []
     if phone.digits_only and len(phone.digits_only) >= 10:
-        pattern = re.compile(rf"(?<!\d){re.escape(phone.digits_only)}(?!\d)")
+        digit_candidates.append(phone.digits_only)
+    national_digits = phone.digits_only[len(str(phone.country_code)) :] if (phone.digits_only and len(phone.digits_only) > 10) else None
+    if national_digits and len(national_digits) >= 10 and national_digits not in digit_candidates:
+        digit_candidates.append(national_digits)
+
+    for cand_digits in digit_candidates:
+        pattern = re.compile(rf"(?<!\d){re.escape(cand_digits)}(?!\d)")
         match = pattern.search(clean_text)
         if match:
             idx = match.start()
@@ -202,66 +288,98 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
 
             # Check false positives
             if UUID_PATTERN.search(snippet) or ISBN_PATTERN.search(snippet) or DATE_PATTERN.search(snippet):
-                return MatchResult(evidence_origin=evidence_origin, 
+                conf_expl, verif_req = build_calibrated_explanation(
+                    "NONE", "FALSE_POSITIVE", evidence_origin, matched_text=match.group(0)
+                )
+                return MatchResult(
+                    evidence_origin=evidence_origin,
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
                     matched_text=match.group(0),
                     snippet=snippet,
                     match_classification="FALSE_POSITIVE",
-                    confidence_explanation="Digit sequence rejected: overlaps with UUID, date, or ISBN structure.",
+                    confidence_explanation="Candidate sequence is part of an order, invoice, or transaction identifier.",
+                    matched_tier="NONE",
+                    verification_requirement=verif_req,
                 )
 
             # Check transaction pattern
             match_region = clean_text[max(0, idx - 15) : min(len(clean_text), match.end() + 15)]
             if TRANSACTION_PATTERN.search(match_region):
-                return MatchResult(evidence_origin=evidence_origin, 
+                conf_expl, verif_req = build_calibrated_explanation(
+                    "NONE", "FALSE_POSITIVE", evidence_origin, matched_text=match.group(0)
+                )
+                return MatchResult(
+                    evidence_origin=evidence_origin,
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
                     matched_text=match.group(0),
                     snippet=snippet,
                     match_classification="FALSE_POSITIVE",
-                    confidence_explanation="Digit sequence matches transaction ID, invoice code, or tracking prefix.",
+                    confidence_explanation="Candidate sequence is part of an order, invoice, or transaction identifier.",
+                    matched_tier="NONE",
+                    verification_requirement=verif_req,
                 )
 
             has_tel_context = bool(TELEPHONE_CONTEXT_KEYWORDS.search(snippet))
             has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
 
-            if has_tel_context:
-                return MatchResult(evidence_origin=evidence_origin, 
-                    matched=True,
-                    match_type="PROBABLE",
-                    confidence=0.80 if not has_example_marker else 0.65,
-                    matched_text=match.group(0),
-                    snippet=snippet,
-                    match_classification="POSSIBLE_MATCH",
-                    confidence_explanation="Unformatted 10-digit sequence appearing alongside explicit telephone/contact keywords.",
-                    is_example_or_test=has_example_marker,
-                )
+            if has_example_marker:
+                conf = 0.55
+                match_class = "INCIDENTAL_MENTION"
+            elif has_tel_context:
+                conf = 0.80
+                match_class = "POSSIBLE_MATCH"
             else:
-                return MatchResult(evidence_origin=evidence_origin, 
-                    matched=True,
-                    match_type="PROBABLE",
-                    confidence=0.75 if not has_example_marker else 0.55,
-                    matched_text=match.group(0),
-                    snippet=snippet,
-                    match_classification="INCIDENTAL_MENTION",
-                    confidence_explanation="Continuous digit sequence matching telephone length without explicit contact label.",
-                    is_example_or_test=has_example_marker,
-                )
+                conf = 0.75
+                match_class = "INCIDENTAL_MENTION"
 
-    # 4. Weak / Inconclusive match: national digits without country code
-    national_digits = phone.digits_only[len(str(phone.country_code)) :] if len(phone.digits_only) > 10 else phone.digits_only
-    if national_digits and len(national_digits) >= 10:
-        pattern = re.compile(rf"(?<!\d){re.escape(national_digits)}(?!\d)")
+            conf_expl, verif_req = build_calibrated_explanation(
+                "UNFORMATTED_DIGITS",
+                match_class,
+                evidence_origin,
+                is_example_or_test=has_example_marker,
+                has_tel_context=has_tel_context,
+                matched_text=match.group(0),
+            )
+            return MatchResult(
+                evidence_origin=evidence_origin,
+                matched=True,
+                match_type="PROBABLE",
+                confidence=conf,
+                matched_text=match.group(0),
+                snippet=snippet,
+                match_classification=match_class,
+                confidence_explanation=conf_expl,
+                is_example_or_test=has_example_marker,
+                matched_tier="UNFORMATTED_DIGITS",
+                verification_requirement=verif_req,
+            )
+
+    # 4. Weak / Inconclusive match: local digits fragment (7-9 digits) lacking area code
+    local_digits = None
+    if phone.digits_only and len(phone.digits_only) == 10:
+        local_digits = phone.digits_only[3:]
+    elif phone.digits_only and len(phone.digits_only) > 10:
+        nat = phone.digits_only[len(str(phone.country_code)) :]
+        if len(nat) == 10:
+            local_digits = nat[3:]
+
+    if local_digits and len(local_digits) >= 7:
+        pattern = re.compile(rf"(?<!\d){re.escape(local_digits)}(?!\d)")
         match = pattern.search(clean_text)
         if match:
             idx = match.start()
             snippet = extract_context_snippet(clean_text, idx, match.end())
             # Check false positives
-            if TRANSACTION_PATTERN.search(snippet) or UUID_PATTERN.search(snippet):
-                return MatchResult(evidence_origin=evidence_origin, 
+            if TRANSACTION_PATTERN.search(snippet) or UUID_PATTERN.search(snippet) or DATE_PATTERN.search(snippet):
+                conf_expl, verif_req = build_calibrated_explanation(
+                    "NONE", "FALSE_POSITIVE", evidence_origin, matched_text=match.group(0)
+                )
+                return MatchResult(
+                    evidence_origin=evidence_origin,
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
@@ -269,20 +387,34 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
                     snippet=snippet,
                     match_classification="FALSE_POSITIVE",
                     confidence_explanation="Local digit fragment identified as transaction ID or UUID segment.",
+                    matched_tier="NONE",
+                    verification_requirement=verif_req,
                 )
 
-            return MatchResult(evidence_origin=evidence_origin, 
+            conf_expl, verif_req = build_calibrated_explanation(
+                "LOCAL_FRAGMENT",
+                "INCONCLUSIVE",
+                evidence_origin,
+                is_example_or_test=is_test_number,
+                matched_text=match.group(0),
+            )
+            return MatchResult(
+                evidence_origin=evidence_origin,
                 matched=True,
                 match_type="WEAK",
                 confidence=0.45,
                 matched_text=match.group(0),
                 snippet=snippet,
                 match_classification="INCONCLUSIVE",
-                confidence_explanation="Ambiguous local digit sequence lacking area code or explicit telephone designation.",
+                confidence_explanation=conf_expl,
                 is_example_or_test=is_test_number,
+                matched_tier="LOCAL_FRAGMENT",
+                verification_requirement=verif_req,
             )
 
-    return MatchResult(evidence_origin=evidence_origin, 
+    conf_expl, verif_req = build_calibrated_explanation("NONE", "INCONCLUSIVE", evidence_origin, matched_text="")
+    return MatchResult(
+        evidence_origin=evidence_origin,
         matched=False,
         match_type="NONE",
         confidence=0.0,
@@ -290,4 +422,6 @@ def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str 
         snippet="",
         match_classification="INCONCLUSIVE",
         confidence_explanation="No matching phone representation detected in provided text.",
+        matched_tier="NONE",
+        verification_requirement=verif_req,
     )

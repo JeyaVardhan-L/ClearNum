@@ -13,6 +13,7 @@ from backend.app.core.security import compute_phone_hmac, mask_phone_number
 from backend.app.core.canonical_url import canonicalize_url
 from backend.app.core.ssrf import safe_fetch_url
 from backend.app.engines.discovery import parse_and_normalize, match_phone_in_text
+from backend.app.engines.discovery.matcher import format_evidence_requirement, EXAMPLE_PATTERN
 from backend.app.engines.discovery.providers import (
     SearXNGProvider,
     DuckDuckGoProvider,
@@ -411,8 +412,8 @@ async def scan_discovery_endpoint(req: ScanRequest):
         if not match_eval.matched:
             continue
 
-        # 5. Valid match types only (EXACT, PROBABLE, WEAK)
-        if match_eval.match_type not in ("EXACT", "PROBABLE", "WEAK"):
+        # 5. Valid match types only (EXACT, PROBABLE) - never promote inconclusive or weak local fragments to exposures
+        if match_eval.match_type not in ("EXACT", "PROBABLE") or match_eval.match_classification == "INCONCLUSIVE":
             continue
 
         match_type = match_eval.match_type
@@ -554,6 +555,8 @@ async def scan_discovery_endpoint(req: ScanRequest):
         match_class = getattr(match_eval, "match_classification", "POSSIBLE_MATCH")
         conf_expl = getattr(match_eval, "confidence_explanation", "") or "Matched target telephone number."
         is_ex = getattr(match_eval, "is_example_or_test", False)
+        matched_tier = getattr(match_eval, "matched_tier", "NONE")
+        verif_req = getattr(match_eval, "verification_requirement", "")
 
         item_obj = DiscoveredExposureItem(
             id=exposure_id,
@@ -575,6 +578,8 @@ async def scan_discovery_endpoint(req: ScanRequest):
             confidence_explanation=conf_expl,
             provider_status=provider_status,
             is_example_or_test=is_ex,
+            matched_tier=matched_tier,
+            verification_requirement=verif_req,
         )
         discovered_items_by_canonical[canonical_url] = item_obj
 
@@ -629,22 +634,55 @@ def list_exposures_endpoint(identity_hmac: str):
     rows = cursor.fetchall()
     conn.close()
 
-    def _classify_stored_record(m_type: str, conf: float) -> Tuple[str, str]:
+    def _classify_stored_record(m_type: str, conf: float, ev_orig: str = "UNKNOWN", snip: str = "") -> Tuple[str, str, str, str]:
+        origin_req = format_evidence_requirement(ev_orig)
+        has_example = bool(EXAMPLE_PATTERN.search(snip or ""))
+
         if m_type == "EXACT":
-            return "CONFIRMED_MATCH", "Exact verified telephone representation."
+            if conf <= 0.75 or has_example:
+                m_class = "INCIDENTAL_MENTION"
+                tier = "EXACT_CANONICAL"
+                core = "Exact telephone representation appears in documentation or test fixture context."
+            else:
+                m_class = "CONFIRMED_MATCH"
+                tier = "EXACT_CANONICAL"
+                core = "Exact verified telephone representation in plausible contact context."
         elif m_type == "PROBABLE":
-            if conf <= 0.75:
-                return "INCIDENTAL_MENTION", "Continuous digit sequence matching telephone length without explicit contact label."
-            return "POSSIBLE_MATCH", "Probable formatted telephone match in public context."
+            if conf <= 0.75 or has_example:
+                m_class = "INCIDENTAL_MENTION"
+                tier = "UNFORMATTED_DIGITS"
+                core = "Continuous digit sequence matching telephone length without explicit contact label."
+            elif conf <= 0.80:
+                m_class = "POSSIBLE_MATCH"
+                tier = "UNFORMATTED_DIGITS"
+                core = "Continuous digit sequence appearing alongside explicit telephone/contact keywords."
+            else:
+                m_class = "POSSIBLE_MATCH"
+                tier = "SPACED_NATIONAL"
+                core = "Spaced national telephone format matching local numbering plan."
         elif m_type == "WEAK":
-            return "INCONCLUSIVE", "Ambiguous local digit sequence lacking area code or explicit telephone designation."
-        return "INCONCLUSIVE", "Stored exposure record."
+            m_class = "INCONCLUSIVE"
+            tier = "LOCAL_FRAGMENT"
+            core = "Ambiguous local digit sequence lacking area code or explicit telephone designation."
+        elif m_type == "FALSE_POSITIVE":
+            m_class = "FALSE_POSITIVE"
+            tier = "NONE"
+            core = "Digit sequence identified as invoice, transaction ID, date, or UUID."
+            return m_class, core, tier, "Candidate discarded as false positive; no exposure created."
+        else:
+            m_class = "INCONCLUSIVE"
+            tier = "NONE"
+            core = "Stored exposure record with inconclusive match status."
+
+        full_expl = f"{core} {origin_req}"
+        return m_class, full_expl, tier, origin_req
 
     items = []
     for r in rows:
-        match_class, conf_expl = _classify_stored_record(r["match_type"], float(r["confidence"]))
         canon_u = r["canonical_url"] if ("canonical_url" in r.keys() and r["canonical_url"]) else (canonicalize_url(r["url"]) or r["url"])
         ev_orig = r["evidence_origin"] if ("evidence_origin" in r.keys() and r["evidence_origin"]) else "UNKNOWN"
+        snip = r["snippet"] or ""
+        match_class, conf_expl, tier, verif_req = _classify_stored_record(r["match_type"], float(r["confidence"]), ev_orig, snip)
         items.append(
             DiscoveredExposureItem(
                 id=r["id"],
@@ -654,7 +692,7 @@ def list_exposures_endpoint(identity_hmac: str):
                 title=r["title"] or r["domain"],
                 match_type=r["match_type"],
                 confidence=r["confidence"],
-                snippet=r["snippet"] or "",
+                snippet=snip,
                 discovered_at=r["discovered_at"],
                 last_checked_at=r["last_checked_at"],
                 remediation_status=r["remediation_status"] or "DISCOVERED",
@@ -666,6 +704,8 @@ def list_exposures_endpoint(identity_hmac: str):
                 confidence_explanation=conf_expl,
                 provider_status="RECORDED",
                 is_example_or_test=False,
+                matched_tier=tier,
+                verification_requirement=verif_req,
             )
         )
     return items

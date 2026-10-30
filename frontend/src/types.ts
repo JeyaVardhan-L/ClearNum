@@ -50,6 +50,8 @@ export interface DiscoveredExposure {
   confidence_explanation?: string;
   provider_status?: string;
   is_example_or_test?: boolean;
+  matched_tier?: string;
+  verification_requirement?: string;
 }
 
 export interface ProviderDisclosureItem {

@@ -13,6 +13,7 @@ import {
   SlidersHorizontal,
   HelpCircle,
   MessageSquare,
+  Clock,
 } from "lucide-react";
 import type { DiscoveredExposure, PhoneParseResult } from "../types";
 import { transitionAction, verifyExposure } from "../api";
@@ -160,7 +161,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     }
   };
 
-  const getMatchBadge = (matchType: string, classification?: string, isExample?: boolean) => {
+  const getMatchBadge = (matchType: string, classification?: string, isExample?: boolean, matchedTier?: string) => {
     const classType = classification || (matchType === "EXACT" ? "CONFIRMED_MATCH" : matchType === "PROBABLE" ? "POSSIBLE_MATCH" : "INCONCLUSIVE");
 
     let badge;
@@ -169,13 +170,13 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         badge = <span className="status-pill pill-pixel-green font-mono text-[10px]">Exact Match (Confirmed)</span>;
         break;
       case "POSSIBLE_MATCH":
-        badge = <span className="status-pill pill-pixel-cyan font-mono text-[10px]">Probable Match (Possible)</span>;
+        badge = <span className="status-pill pill-pixel-cyan font-mono text-[10px]">Probable Match</span>;
         break;
       case "INCIDENTAL_MENTION":
         badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px]">Incidental Mention</span>;
         break;
       case "INCONCLUSIVE":
-        badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px] text-amber-400">Inconclusive</span>;
+        badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px] text-amber-400">Inconclusive Fragment</span>;
         break;
       case "FALSE_POSITIVE":
         badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">False Positive</span>;
@@ -184,17 +185,21 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">{matchType}</span>;
     }
 
-    if (isExample) {
-      return (
-        <div className="flex flex-col gap-1">
-          {badge}
+    return (
+      <div className="flex flex-col gap-1 items-start">
+        {badge}
+        {isExample && (
           <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300">
             Documentation / Dummy
           </span>
-        </div>
-      );
-    }
-    return badge;
+        )}
+        {matchedTier && matchedTier !== "NONE" && (
+          <span className="text-[9px] font-mono text-[var(--text-dim)] uppercase tracking-wider">
+            Tier: {matchedTier.replace("_", " ")}
+          </span>
+        )}
+      </div>
+    );
   };
 
   const getStatusBadge = (status: string) => {
@@ -471,8 +476,30 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                           {getEvidenceOriginBadge(exp.evidence_origin)}
                         </div>
                       </div>
+
+                      {/* Honest Evidence Origin & Verification Limitations Callout */}
+                      {exp.evidence_origin === "SEARCH_SNIPPET" && (
+                        <div className="text-[10px] text-amber-400/90 bg-amber-950/20 border border-amber-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
+                          <AlertTriangle className="w-2.5 h-2.5 text-amber-400 shrink-0" />
+                          <span>Snippet only — live page uninspected</span>
+                        </div>
+                      )}
+                      {exp.evidence_origin === "ARCHIVED_SNAPSHOT" && (
+                        <div className="text-[10px] text-purple-300/90 bg-purple-950/20 border border-purple-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
+                          <Clock className="w-2.5 h-2.5 text-purple-400 shrink-0" />
+                          <span>Historical snapshot — current exposure unconfirmed</span>
+                        </div>
+                      )}
+                      {exp.evidence_origin === "FETCHED_PAGE" && (
+                        <div className="text-[10px] text-emerald-400/90 bg-emerald-950/20 border border-emerald-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
+                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
+                          <span>Live page body inspected: presence confirmed</span>
+                        </div>
+                      )}
+
                       {exp.confidence_explanation && (
-                        <div className="text-[10px] text-[var(--text-dim)] mt-1 italic">
+                        <div className="text-[10px] text-[var(--text-dim)] mt-1.5 leading-relaxed bg-[var(--bg-card)]/50 p-1.5 rounded border border-[var(--border-subtle)]">
+                          <span className="text-[var(--text-muted)] font-semibold">Evaluation: </span>
                           {exp.confidence_explanation}
                         </div>
                       )}
@@ -481,9 +508,19 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     {/* Match Confidence & Classification */}
                     <td>
                       <div className="space-y-1">
-                        {getMatchBadge(exp.match_type, exp.match_classification, exp.is_example_or_test)}
-                        <div className="text-[10px] text-[var(--text-dim)] font-mono">
-                          Confidence: {(exp.confidence * 100).toFixed(0)}%
+                        {getMatchBadge(exp.match_type, exp.match_classification, exp.is_example_or_test, exp.matched_tier)}
+                        <div className="text-[10px] text-[var(--text-dim)] font-mono flex items-center gap-1.5 mt-0.5">
+                          <span>Confidence:</span>
+                          <span className="font-semibold text-[var(--text-main)]">{(exp.confidence * 100).toFixed(0)}%</span>
+                        </div>
+                        <div className="text-[9px] text-[var(--text-dim)] font-mono">
+                          {exp.confidence >= 0.95
+                            ? "High Confidence"
+                            : exp.confidence >= 0.80
+                            ? "Medium-High"
+                            : exp.confidence >= 0.65
+                            ? "Medium Confidence"
+                            : "Low / Inconclusive"}
                         </div>
                       </div>
                     </td>

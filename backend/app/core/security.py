@@ -19,9 +19,9 @@ def get_or_create_secret_key(key_path: Optional[Path] = None) -> bytes:
     target_key.parent.mkdir(parents=True, exist_ok=True)
     if target_key.exists():
         try:
-            key = target_key.read_bytes().strip()
+            key = target_key.read_bytes()
             if len(key) >= 32:
-                return key
+                return key[:32]
         except Exception:
             pass
     

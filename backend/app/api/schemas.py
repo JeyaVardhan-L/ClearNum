@@ -79,6 +79,8 @@ class DiscoveredExposureItem(BaseModel):
     confidence_explanation: Optional[str] = None
     provider_status: Optional[str] = None
     is_example_or_test: bool = False
+    matched_tier: Optional[str] = None
+    verification_requirement: Optional[str] = None
 
 
 class ProviderOutcomeItem(BaseModel):
