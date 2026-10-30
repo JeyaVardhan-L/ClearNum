@@ -387,8 +387,26 @@ async def scan_discovery_endpoint(req: ScanRequest):
 
         # Context match evaluation
         match_eval = match_phone_in_text(f"{item.title} {item.snippet}", norm)
-        match_type = match_eval.match_type if match_eval.matched else "PROBABLE"
-        confidence = match_eval.confidence if match_eval.matched else 0.75
+
+        # 1. Fail safely if matcher output is missing or malformed; never invent confidence or classification
+        if not match_eval or not hasattr(match_eval, "match_type"):
+            continue
+
+        # 2. Strict False-Positive Rejection:
+        # Never allow rejected patterns (invoices, transaction IDs, dates, UUIDs) to become exposures
+        if match_eval.match_type == "FALSE_POSITIVE" or getattr(match_eval, "match_classification", "") == "FALSE_POSITIVE":
+            continue
+
+        # 3. Non-matches: Do not silently turn matched=False into a positive match
+        if not match_eval.matched:
+            continue
+
+        # 4. Valid match types only (EXACT, PROBABLE, WEAK)
+        if match_eval.match_type not in ("EXACT", "PROBABLE", "WEAK"):
+            continue
+
+        match_type = match_eval.match_type
+        confidence = match_eval.confidence
         snippet = match_eval.snippet if match_eval.snippet else (item.snippet or item.title)
 
         parsed = urlparse(clean_url)
@@ -456,9 +474,9 @@ async def scan_discovery_endpoint(req: ScanRequest):
 
         # Canonical URL stripping tracking parameters and query strings
         canonical_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
-        matched_repr = match_eval.matched_text if (match_eval and match_eval.matched_text) else norm.masked_display
-        match_class = getattr(match_eval, "match_classification", "POSSIBLE_MATCH") if match_eval.matched else "INCONCLUSIVE"
-        conf_expl = getattr(match_eval, "confidence_explanation", "") if match_eval.matched else "Probabilistic search snippet match."
+        matched_repr = match_eval.matched_text if match_eval.matched_text else norm.masked_display
+        match_class = getattr(match_eval, "match_classification", "POSSIBLE_MATCH")
+        conf_expl = getattr(match_eval, "confidence_explanation", "") or "Matched target telephone number."
         is_ex = getattr(match_eval, "is_example_or_test", False)
 
         discovered_items.append(DiscoveredExposureItem(
@@ -531,29 +549,43 @@ def list_exposures_endpoint(identity_hmac: str):
     rows = cursor.fetchall()
     conn.close()
 
-    return [
-        DiscoveredExposureItem(
-            id=r["id"],
-            source_id=r["source_id"],
-            url=r["url"],
-            domain=r["domain"],
-            title=r["title"] or r["domain"],
-            match_type=r["match_type"],
-            confidence=r["confidence"],
-            snippet=r["snippet"] or "",
-            discovered_at=r["discovered_at"],
-            last_checked_at=r["last_checked_at"],
-            remediation_status=r["remediation_status"] or "DISCOVERED",
-            official_removal_url=r["official_removal_url"],
-            canonical_url=r["url"].split("#")[0].split("?")[0].rstrip("/"),
-            matched_representation=None,
-            match_classification="CONFIRMED_MATCH" if r["match_type"] == "EXACT" else ("POSSIBLE_MATCH" if r["match_type"] == "PROBABLE" else "INCONCLUSIVE"),
-            confidence_explanation="Stored exposure record from previous discovery run.",
-            provider_status="RECORDED",
-            is_example_or_test=False,
+    def _classify_stored_record(m_type: str, conf: float) -> Tuple[str, str]:
+        if m_type == "EXACT":
+            return "CONFIRMED_MATCH", "Exact verified telephone representation."
+        elif m_type == "PROBABLE":
+            if conf <= 0.75:
+                return "INCIDENTAL_MENTION", "Continuous digit sequence matching telephone length without explicit contact label."
+            return "POSSIBLE_MATCH", "Probable formatted telephone match in public context."
+        elif m_type == "WEAK":
+            return "INCONCLUSIVE", "Ambiguous local digit sequence lacking area code or explicit telephone designation."
+        return "INCONCLUSIVE", "Stored exposure record."
+
+    items = []
+    for r in rows:
+        match_class, conf_expl = _classify_stored_record(r["match_type"], float(r["confidence"]))
+        items.append(
+            DiscoveredExposureItem(
+                id=r["id"],
+                source_id=r["source_id"],
+                url=r["url"],
+                domain=r["domain"],
+                title=r["title"] or r["domain"],
+                match_type=r["match_type"],
+                confidence=r["confidence"],
+                snippet=r["snippet"] or "",
+                discovered_at=r["discovered_at"],
+                last_checked_at=r["last_checked_at"],
+                remediation_status=r["remediation_status"] or "DISCOVERED",
+                official_removal_url=r["official_removal_url"],
+                canonical_url=r["url"].split("#")[0].split("?")[0].rstrip("/"),
+                matched_representation=None,
+                match_classification=match_class,
+                confidence_explanation=conf_expl,
+                provider_status="RECORDED",
+                is_example_or_test=False,
+            )
         )
-        for r in rows
-    ]
+    return items
 
 
 @router.get("/discovery/manual-dorks", response_model=List[ManualDorkItem])
