@@ -61,6 +61,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
         identity_hmac TEXT NOT NULL,
         source_id TEXT NOT NULL,
         url TEXT NOT NULL,
+        canonical_url TEXT,
         domain TEXT,
         title TEXT,
         match_type TEXT NOT NULL, -- 'EXACT', 'PROBABLE', 'WEAK'
@@ -131,6 +132,27 @@ def init_db(db_path: Optional[Path] = None) -> None:
         cursor.execute("UPDATE remediation_actions SET status = 'NO_LONGER_VISIBLE_AT_CHECKED_URL' WHERE status = 'VERIFIED_REMOVED';")
         cursor.execute("UPDATE remediation_actions SET status = 'INACCESSIBLE_OR_INCONCLUSIVE' WHERE status = 'UNABLE_TO_VERIFY';")
         cursor.execute("UPDATE remediation_actions SET status = 'STILL_VISIBLE' WHERE status = 'FAILED';")
+    except Exception:
+        pass
+
+    # Ensure canonical_url column exists on exposures table and backfill existing records
+    try:
+        cursor.execute("ALTER TABLE exposures ADD COLUMN canonical_url TEXT;")
+    except Exception:
+        pass
+
+    try:
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_exposures_canonical ON exposures(identity_hmac, canonical_url);")
+    except Exception:
+        pass
+
+    try:
+        from backend.app.core.canonical_url import canonicalize_url
+        cursor.execute("SELECT id, url FROM exposures WHERE canonical_url IS NULL;")
+        for r in cursor.fetchall():
+            c_url = canonicalize_url(r["url"])
+            if c_url:
+                cursor.execute("UPDATE exposures SET canonical_url = ? WHERE id = ?;", (c_url, r["id"]))
     except Exception:
         pass
 

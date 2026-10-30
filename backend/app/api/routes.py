@@ -3,13 +3,14 @@
 import os
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Optional, Set, Dict, Tuple
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Query
 from urllib.parse import urlparse
 
 from backend.app.core.config import settings
 from backend.app.core.database import get_db_connection, init_db, purge_all_data, utc_now_iso, get_purge_impact
 from backend.app.core.security import compute_phone_hmac, mask_phone_number
+from backend.app.core.canonical_url import canonicalize_url
 from backend.app.core.ssrf import safe_fetch_url
 from backend.app.engines.discovery import parse_and_normalize, match_phone_in_text
 from backend.app.engines.discovery.providers import (
@@ -374,34 +375,41 @@ async def scan_discovery_endpoint(req: ScanRequest):
             except Exception:
                 pass
 
-    # Process and deduplicate results
-    seen_urls = set()
-    discovered_items: List[DiscoveredExposureItem] = []
+    # Process and deduplicate results by canonical URL
+    seen_canonical_in_request: Set[str] = set()
+    discovered_items_by_canonical: Dict[str, DiscoveredExposureItem] = {}
     now_iso = utc_now_iso()
 
     for item in all_provider_results:
-        clean_url = item.url.split("#")[0].strip()
-        if not clean_url or clean_url in seen_urls:
+        raw_url = (item.url or "").strip()
+        if not raw_url:
             continue
-        seen_urls.add(clean_url)
+
+        # 1. Safe Canonicalization & Malformed URL Rejection
+        canonical_url = canonicalize_url(raw_url)
+        if not canonical_url:
+            # Safely reject malformed, unsupported, or non-http/https URLs
+            continue
+
+        clean_url = raw_url.split("#")[0].strip()
 
         # Context match evaluation
         match_eval = match_phone_in_text(f"{item.title} {item.snippet}", norm)
 
-        # 1. Fail safely if matcher output is missing or malformed; never invent confidence or classification
+        # 2. Fail safely if matcher output is missing or malformed; never invent confidence or classification
         if not match_eval or not hasattr(match_eval, "match_type"):
             continue
 
-        # 2. Strict False-Positive Rejection:
+        # 3. Strict False-Positive Rejection:
         # Never allow rejected patterns (invoices, transaction IDs, dates, UUIDs) to become exposures
         if match_eval.match_type == "FALSE_POSITIVE" or getattr(match_eval, "match_classification", "") == "FALSE_POSITIVE":
             continue
 
-        # 3. Non-matches: Do not silently turn matched=False into a positive match
+        # 4. Non-matches: Do not silently turn matched=False into a positive match
         if not match_eval.matched:
             continue
 
-        # 4. Valid match types only (EXACT, PROBABLE, WEAK)
+        # 5. Valid match types only (EXACT, PROBABLE, WEAK)
         if match_eval.match_type not in ("EXACT", "PROBABLE", "WEAK"):
             continue
 
@@ -409,47 +417,100 @@ async def scan_discovery_endpoint(req: ScanRequest):
         confidence = match_eval.confidence
         snippet = match_eval.snippet if match_eval.snippet else (item.snippet or item.title)
 
-        parsed = urlparse(clean_url)
+        parsed = urlparse(canonical_url)
         domain = parsed.netloc.lower().replace("www.", "")
 
         # Look up remediation source
-        rem_source = lookup_source_by_url(clean_url)
+        rem_source = lookup_source_by_url(canonical_url) or lookup_source_by_url(clean_url)
         source_id = rem_source.source_id if rem_source else "generic_web"
         official_removal_url = rem_source.official_removal_url if rem_source else None
 
-        cursor.execute("SELECT id FROM exposures WHERE identity_hmac = ? AND url = ?", (norm.hmac_id, clean_url))
+        # Check deduplication within the current scan request batch:
+        if canonical_url in seen_canonical_in_request:
+            # Same canonical page returned by multiple providers in the same scan run
+            cursor.execute("""
+                SELECT id, confidence, snippet, match_type, discovered_at FROM exposures
+                WHERE identity_hmac = ? AND (canonical_url = ? OR url = ?)
+            """, (norm.hmac_id, canonical_url, clean_url))
+            existing_row = cursor.fetchone()
+            if existing_row:
+                exp_id = existing_row["id"]
+                new_conf = max(float(existing_row["confidence"]), float(confidence))
+                better_snippet = snippet if len(snippet) > len(existing_row["snippet"] or "") else existing_row["snippet"]
+                best_match_type = match_type if confidence >= float(existing_row["confidence"]) else existing_row["match_type"]
+                cursor.execute("""
+                    UPDATE exposures
+                    SET last_checked_at = ?, confidence = ?, snippet = ?, match_type = ?
+                    WHERE id = ?
+                """, (now_iso, new_conf, better_snippet, best_match_type, exp_id))
+
+                # Update provider provenance in remediation_actions notes
+                cursor.execute("SELECT id, notes FROM remediation_actions WHERE exposure_id = ?", (exp_id,))
+                act_row = cursor.fetchone()
+                if act_row:
+                    cur_notes = act_row["notes"] or ""
+                    p_id = item.provider_id or "search"
+                    if p_id not in cur_notes:
+                        updated_notes = f"{cur_notes}, {p_id}" if cur_notes else f"Discovered via {p_id} search"
+                        cursor.execute("UPDATE remediation_actions SET notes = ?, updated_at = ? WHERE id = ?", (updated_notes, now_iso, act_row["id"]))
+
+                if canonical_url in discovered_items_by_canonical:
+                    item_ref = discovered_items_by_canonical[canonical_url]
+                    item_ref.confidence = new_conf
+                    item_ref.snippet = better_snippet
+                    item_ref.last_checked_at = now_iso
+            continue
+
+        seen_canonical_in_request.add(canonical_url)
+
+        # Check database for existing exposure by (identity_hmac, canonical_url) or fallback (identity_hmac, url)
+        cursor.execute("""
+            SELECT id, source_id, url, canonical_url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+            FROM exposures
+            WHERE identity_hmac = ? AND (canonical_url = ? OR url = ?)
+        """, (norm.hmac_id, canonical_url, clean_url))
         existing_exp = cursor.fetchone()
 
         if existing_exp:
             exposure_id = existing_exp["id"]
+            discovered_at = existing_exp["discovered_at"]
+            # A later discovery updates last_checked_at without destroying original discovered_at evidence
+            new_conf = max(float(existing_exp["confidence"]), float(confidence))
+            better_snippet = snippet if len(snippet) > len(existing_exp["snippet"] or "") else existing_exp["snippet"]
+            best_match_type = match_type if confidence >= float(existing_exp["confidence"]) else existing_exp["match_type"]
             cursor.execute("""
                 UPDATE exposures
-                SET last_checked_at = ?, snippet = ?, confidence = ?, match_type = ?
+                SET last_checked_at = ?, canonical_url = ?, snippet = ?, confidence = ?, match_type = ?
                 WHERE id = ?
-            """, (now_iso, snippet, confidence, match_type, exposure_id))
+            """, (now_iso, canonical_url, better_snippet, new_conf, best_match_type, exposure_id))
+            provider_status = "RECORDED"
         else:
             exposure_id = str(uuid.uuid4())
+            discovered_at = now_iso
             cursor.execute("""
                 INSERT INTO exposures (
-                    id, identity_hmac, source_id, url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    id, identity_hmac, source_id, url, canonical_url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """, (
                 exposure_id,
                 norm.hmac_id,
                 source_id,
                 clean_url,
+                canonical_url,
                 domain,
                 item.title,
                 match_type,
                 confidence,
                 snippet,
-                now_iso,
+                discovered_at,
                 now_iso,
             ))
+            provider_status = "NEW"
 
-        # Check existing remediation action
-        cursor.execute("SELECT id, status, official_url FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
+        # Check / update remediation action and preserve provider provenance
+        cursor.execute("SELECT id, status, official_url, notes FROM remediation_actions WHERE exposure_id = ?", (exposure_id,))
         act_row = cursor.fetchone()
+        p_id = item.provider_id or "search"
 
         if not act_row:
             action_id = str(uuid.uuid4())
@@ -465,21 +526,27 @@ async def scan_discovery_endpoint(req: ScanRequest):
                 source_id,
                 rem_status,
                 official_removal_url,
-                "Discovered via search provider",
+                f"Discovered via {p_id} search",
                 now_iso,
             ))
         else:
             rem_status = act_row["status"]
             official_removal_url = act_row["official_url"]
+            cur_notes = act_row["notes"] or ""
+            if p_id not in cur_notes:
+                updated_notes = f"{cur_notes}, {p_id}" if cur_notes else f"Discovered via {p_id} search"
+                cursor.execute("""
+                    UPDATE remediation_actions
+                    SET notes = ?, updated_at = ?
+                    WHERE id = ?
+                """, (updated_notes, now_iso, act_row["id"]))
 
-        # Canonical URL stripping tracking parameters and query strings
-        canonical_url = f"{parsed.scheme}://{parsed.netloc}{parsed.path}".rstrip("/")
         matched_repr = match_eval.matched_text if match_eval.matched_text else norm.masked_display
         match_class = getattr(match_eval, "match_classification", "POSSIBLE_MATCH")
         conf_expl = getattr(match_eval, "confidence_explanation", "") or "Matched target telephone number."
         is_ex = getattr(match_eval, "is_example_or_test", False)
 
-        discovered_items.append(DiscoveredExposureItem(
+        item_obj = DiscoveredExposureItem(
             id=exposure_id,
             source_id=source_id,
             url=clean_url,
@@ -488,7 +555,7 @@ async def scan_discovery_endpoint(req: ScanRequest):
             match_type=match_type,
             confidence=confidence,
             snippet=snippet,
-            discovered_at=now_iso,
+            discovered_at=discovered_at,
             last_checked_at=now_iso,
             remediation_status=rem_status,
             official_removal_url=official_removal_url,
@@ -496,9 +563,12 @@ async def scan_discovery_endpoint(req: ScanRequest):
             matched_representation=matched_repr,
             match_classification=match_class,
             confidence_explanation=conf_expl,
-            provider_status="HEALTHY",
+            provider_status=provider_status,
             is_example_or_test=is_ex,
-        ))
+        )
+        discovered_items_by_canonical[canonical_url] = item_obj
+
+    discovered_items = list(discovered_items_by_canonical.values())
 
     conn.commit()
     conn.close()
@@ -539,7 +609,7 @@ def list_exposures_endpoint(identity_hmac: str):
     conn = get_db_connection()
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT e.id, e.source_id, e.url, e.domain, e.title, e.match_type, e.confidence, e.snippet,
+        SELECT e.id, e.source_id, e.url, e.canonical_url, e.domain, e.title, e.match_type, e.confidence, e.snippet,
                e.discovered_at, e.last_checked_at, r.status as remediation_status, r.official_url as official_removal_url
         FROM exposures e
         LEFT JOIN remediation_actions r ON r.exposure_id = e.id
@@ -563,6 +633,7 @@ def list_exposures_endpoint(identity_hmac: str):
     items = []
     for r in rows:
         match_class, conf_expl = _classify_stored_record(r["match_type"], float(r["confidence"]))
+        canon_u = r["canonical_url"] if ("canonical_url" in r.keys() and r["canonical_url"]) else (canonicalize_url(r["url"]) or r["url"])
         items.append(
             DiscoveredExposureItem(
                 id=r["id"],
@@ -577,7 +648,7 @@ def list_exposures_endpoint(identity_hmac: str):
                 last_checked_at=r["last_checked_at"],
                 remediation_status=r["remediation_status"] or "DISCOVERED",
                 official_removal_url=r["official_removal_url"],
-                canonical_url=r["url"].split("#")[0].split("?")[0].rstrip("/"),
+                canonical_url=canon_u,
                 matched_representation=None,
                 match_classification=match_class,
                 confidence_explanation=conf_expl,
@@ -1234,21 +1305,22 @@ def load_synthetic_scenario_endpoint():
     ]
 
     for source_id, url, domain, title, match_type, conf, snippet, status, rem_url, sub_ref, notes in fixtures:
-        cursor.execute("SELECT id FROM exposures WHERE identity_hmac = ? AND url = ?", (norm.hmac_id, url))
+        canon_url = canonicalize_url(url) or url
+        cursor.execute("SELECT id FROM exposures WHERE identity_hmac = ? AND (canonical_url = ? OR url = ?)", (norm.hmac_id, canon_url, url))
         row = cursor.fetchone()
         if row:
             exp_id = row[0]
             cursor.execute(
-                "UPDATE exposures SET last_checked_at = ?, snippet = ?, confidence = ? WHERE id = ?",
-                (now_iso, snippet, conf, exp_id),
+                "UPDATE exposures SET last_checked_at = ?, snippet = ?, confidence = ?, canonical_url = ? WHERE id = ?",
+                (now_iso, snippet, conf, canon_url, exp_id),
             )
         else:
             exp_id = str(uuid.uuid4())
             cursor.execute("""
                 INSERT INTO exposures (
-                    id, identity_hmac, source_id, url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (exp_id, norm.hmac_id, source_id, url, domain, title, match_type, conf, snippet, now_iso, now_iso))
+                    id, identity_hmac, source_id, url, canonical_url, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (exp_id, norm.hmac_id, source_id, url, canon_url, domain, title, match_type, conf, snippet, now_iso, now_iso))
 
         cursor.execute("SELECT id FROM remediation_actions WHERE exposure_id = ?", (exp_id,))
         act_row = cursor.fetchone()
