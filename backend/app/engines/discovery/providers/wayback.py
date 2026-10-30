@@ -153,6 +153,7 @@ class WaybackProvider(SearchProvider):
                                 title=title,
                                 snippet=snippet,
                                 provider_id=self.provider_id,
+                                evidence_origin="ARCHIVED_SNAPSHOT",
                             )
                         )
 

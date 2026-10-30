@@ -118,6 +118,48 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     }
   };
 
+  const getEvidenceOriginBadge = (origin?: string) => {
+    switch (origin) {
+      case "FETCHED_PAGE":
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 inline-flex items-center gap-1"
+            title="Live page content was retrieved and verified directly"
+          >
+            ● Fetched Page Body
+          </span>
+        );
+      case "ARCHIVED_SNAPSHOT":
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-purple-950/40 border border-purple-800/40 text-purple-300 inline-flex items-center gap-1"
+            title="Historical archive snapshot (Wayback Machine). Does not confirm current live exposure."
+          >
+            🕒 Archived Snapshot
+          </span>
+        );
+      case "SEARCH_SNIPPET":
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-400 inline-flex items-center gap-1"
+            title="Match found only in search engine snippet. Page body has not been fetched."
+          >
+            🔍 Search Snippet Only
+          </span>
+        );
+      case "UNKNOWN":
+      default:
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-700 text-zinc-400 inline-flex items-center gap-1"
+            title="Evidence origin not established from historical records"
+          >
+            ❓ Unverified Origin
+          </span>
+        );
+    }
+  };
+
   const getMatchBadge = (matchType: string, classification?: string, isExample?: boolean) => {
     const classType = classification || (matchType === "EXACT" ? "CONFIRMED_MATCH" : matchType === "PROBABLE" ? "POSSIBLE_MATCH" : "INCONCLUSIVE");
 
@@ -401,8 +443,11 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                         <span className="text-[var(--text-dim)]">Canonical: </span>
                         {exp.canonical_url || exp.url}
                       </div>
-                      <div className="text-[10px] text-[var(--text-dim)] mt-0.5 flex items-center gap-2">
+                      <div className="text-[10px] text-[var(--text-dim)] mt-0.5 flex items-center gap-2 flex-wrap">
                         <span>Discovered: {exp.discovered_at ? new Date(exp.discovered_at).toLocaleDateString() : "Recent"}</span>
+                        {exp.last_checked_at && exp.last_checked_at !== exp.discovered_at && (
+                          <span>Checked: {new Date(exp.last_checked_at).toLocaleDateString()}</span>
+                        )}
                         {exp.provider_status && (
                           <span className="kicker-tag text-[8px] py-0">{exp.provider_status}</span>
                         )}
@@ -420,6 +465,10 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                         </div>
                         <div>
                           Source: <span className="text-[var(--pixel-cyan)] font-mono">{exp.source_id}</span>
+                        </div>
+                        <div className="flex items-center gap-1">
+                          <span className="text-[var(--text-dim)]">Origin:</span>
+                          {getEvidenceOriginBadge(exp.evidence_origin)}
                         </div>
                       </div>
                       {exp.confidence_explanation && (

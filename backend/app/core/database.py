@@ -62,6 +62,7 @@ def init_db(db_path: Optional[Path] = None) -> None:
         source_id TEXT NOT NULL,
         url TEXT NOT NULL,
         canonical_url TEXT,
+        evidence_origin TEXT DEFAULT 'UNKNOWN',
         domain TEXT,
         title TEXT,
         match_type TEXT NOT NULL, -- 'EXACT', 'PROBABLE', 'WEAK'
@@ -153,6 +154,17 @@ def init_db(db_path: Optional[Path] = None) -> None:
             c_url = canonicalize_url(r["url"])
             if c_url:
                 cursor.execute("UPDATE exposures SET canonical_url = ? WHERE id = ?;", (c_url, r["id"]))
+    except Exception:
+        pass
+
+    # Ensure evidence_origin column exists on exposures table and backfill legacy records as UNKNOWN
+    try:
+        cursor.execute("ALTER TABLE exposures ADD COLUMN evidence_origin TEXT DEFAULT 'UNKNOWN';")
+    except Exception:
+        pass
+
+    try:
+        cursor.execute("UPDATE exposures SET evidence_origin = 'UNKNOWN' WHERE evidence_origin IS NULL;")
     except Exception:
         pass
 

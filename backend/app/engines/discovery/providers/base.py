@@ -37,9 +37,17 @@ class ProviderResult:
     domain: str
     snippet: str
     provider_id: str
+    evidence_origin: str = "SEARCH_SNIPPET"  # "SEARCH_SNIPPET", "FETCHED_PAGE", "ARCHIVED_SNAPSHOT", "UNKNOWN"
 
     @classmethod
-    def from_url_and_title(cls, url: str, title: str, snippet: str, provider_id: str) -> "ProviderResult":
+    def from_url_and_title(
+        cls,
+        url: str,
+        title: str,
+        snippet: str,
+        provider_id: str,
+        evidence_origin: str = "SEARCH_SNIPPET",
+    ) -> "ProviderResult":
         parsed = urlparse(url)
         domain = parsed.netloc.lower()
         if domain.startswith("www."):
@@ -50,6 +58,7 @@ class ProviderResult:
             domain=domain,
             snippet=snippet.strip() if snippet else "",
             provider_id=provider_id,
+            evidence_origin=evidence_origin,
         )
 
 

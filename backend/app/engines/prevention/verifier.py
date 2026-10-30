@@ -204,12 +204,19 @@ def _update_remediation_action_record(exposure_id: str, outcome: VerificationOut
             outcome.verified_at,
         ))
 
-    # Update last_checked_at on exposure
-    cursor.execute("""
-        UPDATE exposures
-        SET last_checked_at = ?
-        WHERE id = ?
-    """, (outcome.verified_at, exposure_id))
+    # Update last_checked_at on exposure (promote to FETCHED_PAGE if page was confirmed live)
+    if outcome.status == "STILL_VISIBLE":
+        cursor.execute("""
+            UPDATE exposures
+            SET last_checked_at = ?, evidence_origin = 'FETCHED_PAGE'
+            WHERE id = ?
+        """, (outcome.verified_at, exposure_id))
+    else:
+        cursor.execute("""
+            UPDATE exposures
+            SET last_checked_at = ?
+            WHERE id = ?
+        """, (outcome.verified_at, exposure_id))
 
     conn.commit()
     conn.close()

@@ -73,6 +73,7 @@ class DiscoveredExposureItem(BaseModel):
     official_removal_url: Optional[str] = None
     match_rationale: Optional[str] = None
     canonical_url: Optional[str] = None
+    evidence_origin: str = "UNKNOWN"  # SEARCH_SNIPPET, FETCHED_PAGE, ARCHIVED_SNAPSHOT, UNKNOWN
     matched_representation: Optional[str] = None
     match_classification: Optional[str] = "INCONCLUSIVE"  # CONFIRMED_MATCH, POSSIBLE_MATCH, INCIDENTAL_MENTION, INCONCLUSIVE, FALSE_POSITIVE
     confidence_explanation: Optional[str] = None

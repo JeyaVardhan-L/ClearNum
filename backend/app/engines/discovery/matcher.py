@@ -23,6 +23,7 @@ class MatchResult:
     match_classification: str = "INCONCLUSIVE"  # "CONFIRMED_MATCH", "POSSIBLE_MATCH", "INCIDENTAL_MENTION", "INCONCLUSIVE", "FALSE_POSITIVE"
     confidence_explanation: str = ""
     is_example_or_test: bool = False
+    evidence_origin: str = "UNKNOWN"  # "SEARCH_SNIPPET", "FETCHED_PAGE", "ARCHIVED_SNAPSHOT", "UNKNOWN"
 
 
 # Regexes to detect common false positive sequences (dates, UUIDs, ISBNs, tracking numbers, transaction IDs)
@@ -89,14 +90,14 @@ def is_nanp_reserved_example(phone: NormalizedPhone) -> bool:
     return False
 
 
-def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
+def match_phone_in_text(text: str, phone: NormalizedPhone, evidence_origin: str = "UNKNOWN") -> MatchResult:
     """Analyzes a block of plain text or HTML for appearances of the target phone number.
     Returns a MatchResult with classification, confidence score, sanitized snippet,
     truthful confidence explanation, and match classification.
     """
     clean_text = sanitize_html_to_text(text)
     if not clean_text or not phone.is_possible:
-        return MatchResult(
+        return MatchResult(evidence_origin=evidence_origin, 
             matched=False,
             match_type="NONE",
             confidence=0.0,
@@ -139,7 +140,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
                 # Check if the match is specifically inside transaction or date
                 match_region = clean_text[max(0, idx - 15) : min(len(clean_text), idx + len(candidate) + 15)]
                 if TRANSACTION_PATTERN.search(match_region):
-                    return MatchResult(
+                    return MatchResult(evidence_origin=evidence_origin, 
                         matched=False,
                         match_type="FALSE_POSITIVE",
                         confidence=0.0,
@@ -152,7 +153,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
 
             has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
             if has_example_marker:
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=True,
                     match_type="EXACT",
                     confidence=0.90,
@@ -163,7 +164,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
                     is_example_or_test=True,
                 )
 
-            return MatchResult(
+            return MatchResult(evidence_origin=evidence_origin, 
                 matched=True,
                 match_type="EXACT",
                 confidence=1.0,
@@ -180,7 +181,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
         idx = clean_text.find(spaced_candidate)
         snippet = extract_context_snippet(clean_text, idx, idx + len(spaced_candidate))
         has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
-        return MatchResult(
+        return MatchResult(evidence_origin=evidence_origin, 
             matched=True,
             match_type="PROBABLE",
             confidence=0.85 if not has_example_marker else 0.70,
@@ -201,7 +202,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
 
             # Check false positives
             if UUID_PATTERN.search(snippet) or ISBN_PATTERN.search(snippet) or DATE_PATTERN.search(snippet):
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
@@ -214,7 +215,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
             # Check transaction pattern
             match_region = clean_text[max(0, idx - 15) : min(len(clean_text), match.end() + 15)]
             if TRANSACTION_PATTERN.search(match_region):
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
@@ -228,7 +229,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
             has_example_marker = bool(EXAMPLE_PATTERN.search(snippet)) or is_test_number
 
             if has_tel_context:
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=True,
                     match_type="PROBABLE",
                     confidence=0.80 if not has_example_marker else 0.65,
@@ -239,7 +240,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
                     is_example_or_test=has_example_marker,
                 )
             else:
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=True,
                     match_type="PROBABLE",
                     confidence=0.75 if not has_example_marker else 0.55,
@@ -260,7 +261,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
             snippet = extract_context_snippet(clean_text, idx, match.end())
             # Check false positives
             if TRANSACTION_PATTERN.search(snippet) or UUID_PATTERN.search(snippet):
-                return MatchResult(
+                return MatchResult(evidence_origin=evidence_origin, 
                     matched=False,
                     match_type="FALSE_POSITIVE",
                     confidence=0.0,
@@ -270,7 +271,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
                     confidence_explanation="Local digit fragment identified as transaction ID or UUID segment.",
                 )
 
-            return MatchResult(
+            return MatchResult(evidence_origin=evidence_origin, 
                 matched=True,
                 match_type="WEAK",
                 confidence=0.45,
@@ -281,7 +282,7 @@ def match_phone_in_text(text: str, phone: NormalizedPhone) -> MatchResult:
                 is_example_or_test=is_test_number,
             )
 
-    return MatchResult(
+    return MatchResult(evidence_origin=evidence_origin, 
         matched=False,
         match_type="NONE",
         confidence=0.0,
