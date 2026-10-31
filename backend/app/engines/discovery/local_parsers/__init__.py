@@ -1,6 +1,12 @@
 """Local file parsers package."""
 from backend.app.engines.discovery.local_parsers.mbox_parser import parse_mbox_file, DiscoveredSubscription
-from backend.app.engines.discovery.local_parsers.sms_parser import parse_sms_backup_file, analyze_single_sms, DiscoveredSMSSender
+from backend.app.engines.discovery.local_parsers.sms_parser import (
+    parse_sms_backup_file,
+    analyze_single_sms,
+    DiscoveredSMSSender,
+    OTP_PATTERN,
+    PROMO_PATTERN,
+)
 
 __all__ = [
     "parse_mbox_file",
@@ -8,4 +14,6 @@ __all__ = [
     "parse_sms_backup_file",
     "analyze_single_sms",
     "DiscoveredSMSSender",
+    "OTP_PATTERN",
+    "PROMO_PATTERN",
 ]

@@ -60,6 +60,10 @@ def format_evidence_requirement(evidence_origin: str) -> str:
         return "Direct live page fetch inspected. Confirms matching text is present in current web page body."
     elif evidence_origin == "ARCHIVED_SNAPSHOT":
         return "Historical archive snapshot (Wayback Machine). Live page re-verification is required to confirm whether exposure persists today."
+    elif evidence_origin == "LOCAL_SMS_BACKUP":
+        return "Local device message archive. Incoming handset notification, not an external web exposure."
+    elif evidence_origin == "LOCAL_EMAIL_ARCHIVE":
+        return "Local email archive. Stored privately in mailbox, not indexed on a public web page."
     else:
         return "Evidence origin unverified; direct live page inspection is required to confirm active exposure."
 
@@ -77,6 +81,18 @@ def build_calibrated_explanation(
 
     if match_classification == "CONFIRMED_MATCH":
         core = "Exact canonical telephone representation matched in plausible contact context."
+    elif match_classification == "PUBLIC_EXPOSURE":
+        core = "Exact verified telephone representation in public data broker or web directory."
+    elif match_classification == "PUBLIC_CONTACT":
+        core = "Official public contact or customer support directory listing."
+    elif match_classification == "LOCAL_AUTH_OTP":
+        core = "Private authentication / one-time password code received on device."
+    elif match_classification == "LOCAL_TRANSACTIONAL":
+        core = "Private transactional alert or service confirmation delivered to device."
+    elif match_classification == "LOCAL_MARKETING":
+        core = "Commercial promotional communication delivered via enterprise telecom gateway."
+    elif match_classification == "SUSPECTED_SPAM":
+        core = "Unsolicited commercial message or suspected spam from direct number."
     elif match_classification == "POSSIBLE_MATCH":
         if matched_tier == "SPACED_NATIONAL":
             core = "Spaced national format matching telephone numbering plan, without full international canonical prefix."

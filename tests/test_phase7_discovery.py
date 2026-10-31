@@ -122,7 +122,7 @@ def test_local_sms_backup_analysis_creates_exposures(clean_synthetic_identity):
 
     sms_finding = next((e for e in exposures if "hdfcbk" in e["domain"] or "hdfcbk" in e["url"]), None)
     assert sms_finding is not None
-    assert sms_finding["evidence_origin"] == "FETCHED_PAGE"
+    assert sms_finding["evidence_origin"] in ("FETCHED_PAGE", "LOCAL_SMS_BACKUP")
     assert sms_finding["match_type"] == "EXACT"
     assert sms_finding["remediation_status"] == "ACTION_AVAILABLE"
 

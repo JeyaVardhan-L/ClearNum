@@ -15,6 +15,8 @@ import {
   HelpCircle,
   AlertTriangle,
   ArrowRight,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import type {
   PhoneParseResult,
@@ -100,6 +102,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
   );
   const [region, setRegion] = useState(currentIdentity?.region_code || "IN");
   const [parseData, setParseData] = useState<PhoneParseResult | null>(currentIdentity);
+  const [revealRawE164, setRevealRawE164] = useState(false);
 
   // Scan & Execution States
   const [isScanning, setIsScanning] = useState(false);
@@ -507,9 +510,22 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
               <span className="text-[10px] text-[var(--text-dim)] uppercase block">Masked Display</span>
               <span className="font-mono font-bold text-[var(--pixel-green)]">{parseData.masked_display}</span>
             </div>
-            <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)]">
-              <span className="text-[10px] text-[var(--text-dim)] uppercase block">E.164 Canonical</span>
-              <span className="font-mono text-[var(--text-main)]">{parseData.e164 || "N/A"}</span>
+            <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)] flex items-center justify-between">
+              <div>
+                <span className="text-[10px] text-[var(--text-dim)] uppercase block">E.164 Canonical</span>
+                <span className="font-mono text-[var(--text-main)]">
+                  {revealRawE164 ? (parseData.e164 || "N/A") : parseData.masked_display}
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setRevealRawE164(!revealRawE164)}
+                className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-1 ml-1"
+                title={revealRawE164 ? "Mask telephone digits" : "Reveal raw E.164 digits"}
+                aria-label={revealRawE164 ? "Mask telephone digits" : "Reveal raw E.164 digits"}
+              >
+                {revealRawE164 ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+              </button>
             </div>
             <div className="p-2.5 rounded bg-[var(--bg-app)] border border-[var(--border-subtle)]">
               <span className="text-[10px] text-[var(--text-dim)] uppercase block">Line Type</span>
@@ -528,11 +544,10 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab("local")}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-t-md transition-colors flex items-center gap-2 ${
-            activeTab === "local"
-              ? "bg-[var(--bg-card)] text-[var(--pixel-green)] border-b-2 border-[var(--pixel-green)]"
-              : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
-          }`}
+          className={`px-4 py-2.5 text-xs font-semibold rounded-t-md transition-colors flex items-center gap-2 ${activeTab === "local"
+            ? "bg-[var(--bg-card)] text-[var(--pixel-green)] border-b-2 border-[var(--pixel-green)]"
+            : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
         >
           <ShieldCheck className="w-4 h-4 text-[var(--pixel-green)]" />
           <span>Local Analysis (Zero Network Outbound)</span>
@@ -540,11 +555,10 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
         <button
           type="button"
           onClick={() => setActiveTab("web")}
-          className={`px-4 py-2.5 text-xs font-semibold rounded-t-md transition-colors flex items-center gap-2 ${
-            activeTab === "web"
-              ? "bg-[var(--bg-card)] text-[var(--pixel-cyan)] border-b-2 border-[var(--pixel-cyan)]"
-              : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
-          }`}
+          className={`px-4 py-2.5 text-xs font-semibold rounded-t-md transition-colors flex items-center gap-2 ${activeTab === "web"
+            ? "bg-[var(--bg-card)] text-[var(--pixel-cyan)] border-b-2 border-[var(--pixel-cyan)]"
+            : "text-[var(--text-muted)] hover:text-[var(--text-main)]"
+            }`}
         >
           <Search className="w-4 h-4 text-[var(--pixel-cyan)]" />
           <span>External Web &amp; Archive Discovery</span>
@@ -881,11 +895,10 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <label
                     onClick={() => setSearchMode("manual")}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${
-                      searchMode === "manual"
-                        ? "border-emerald-500/60 bg-emerald-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(16,185,129,0.15)]"
-                        : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
-                    }`}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${searchMode === "manual"
+                      ? "border-emerald-500/60 bg-emerald-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(16,185,129,0.15)]"
+                      : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-bold text-xs flex items-center gap-1.5 text-emerald-400">
@@ -908,11 +921,10 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
 
                   <label
                     onClick={() => setSearchMode("automated")}
-                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${
-                      searchMode === "automated"
-                        ? "border-amber-500/60 bg-amber-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(245,158,11,0.15)]"
-                        : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
-                    }`}
+                    className={`p-3 rounded-lg border cursor-pointer transition-all flex flex-col justify-between ${searchMode === "automated"
+                      ? "border-amber-500/60 bg-amber-950/20 text-[var(--text-main)] shadow-[0_0_12px_rgba(245,158,11,0.15)]"
+                      : "border-[var(--border-subtle)] bg-[var(--bg-card)] text-[var(--text-muted)] hover:border-slate-700"
+                      }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
                       <span className="font-bold text-xs flex items-center gap-1.5 text-amber-400">
@@ -994,13 +1006,12 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
               {/* Scan Status & Diagnostics */}
               {scanMessage && (
                 <div
-                  className={`p-3.5 rounded-lg border text-xs leading-relaxed ${
-                    scanMessage.includes("incomplete") || scanMessage.includes("all_failed")
-                      ? "border-amber-500/40 bg-amber-950/20 text-amber-300"
-                      : scanMessage.includes("warnings")
+                  className={`p-3.5 rounded-lg border text-xs leading-relaxed ${scanMessage.includes("incomplete") || scanMessage.includes("all_failed")
+                    ? "border-amber-500/40 bg-amber-950/20 text-amber-300"
+                    : scanMessage.includes("warnings")
                       ? "border-cyan-500/40 bg-cyan-950/20 text-cyan-300"
                       : "border-emerald-500/40 bg-emerald-950/20 text-emerald-300"
-                  }`}
+                    }`}
                 >
                   {scanMessage}
                 </div>
@@ -1033,13 +1044,12 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                                 {getProviderDisplayName(po.provider_id)}
                               </span>
                               <span
-                                className={`status-pill ${
-                                  isHealthy
-                                    ? "pill-pixel-green"
-                                    : isRateLimited
+                                className={`status-pill ${isHealthy
+                                  ? "pill-pixel-green"
+                                  : isRateLimited
                                     ? "pill-pixel-yellow"
                                     : "pill-pixel-purple"
-                                }`}
+                                  }`}
                               >
                                 {po.status.toUpperCase()}
                               </span>
@@ -1098,8 +1108,8 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                       <span className="text-[10px] font-semibold text-[var(--text-dim)] uppercase tracking-wider block mb-0.5">
                         E.164 Format
                       </span>
-                      <span className="font-mono text-xs text-[var(--text-main)]">
-                        {parseData.e164 || "N/A"}
+                      <span className="font-mono text-xs text-[var(--text-main)] flex items-center gap-1">
+                        {revealRawE164 ? (parseData.e164 || "N/A") : parseData.masked_display}
                       </span>
                     </div>
                     <div>
@@ -1107,7 +1117,7 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                         National
                       </span>
                       <span className="font-mono text-xs text-[var(--text-main)]">
-                        {parseData.national || "N/A"}
+                        {revealRawE164 ? (parseData.national || "N/A") : parseData.masked_display}
                       </span>
                     </div>
                   </div>
@@ -1213,7 +1223,21 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
               </div>
 
               <div className="space-y-1 font-mono text-[11px] text-[var(--text-muted)]">
-                <div>Target Phone Number: <span className="text-[var(--pixel-cyan)] font-bold">{parseData?.e164 || phoneNumber}</span></div>
+                <div className="flex items-center gap-1.5">
+                  <span>Target Phone Number:</span>
+                  <span className="text-[var(--pixel-cyan)] font-bold">
+                    {revealRawE164 ? (parseData?.e164 || phoneNumber) : (disclosureData.masked_phone || parseData?.masked_display)}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setRevealRawE164(!revealRawE164)}
+                    className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-0.5"
+                    title={revealRawE164 ? "Mask phone digits" : "Reveal raw digits"}
+                    aria-label={revealRawE164 ? "Mask phone digits" : "Reveal raw digits"}
+                  >
+                    {revealRawE164 ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                  </button>
+                </div>
                 <div>Masked Identity: <span className="text-[var(--text-main)] font-bold">{disclosureData.masked_phone}</span></div>
               </div>
 
@@ -1271,11 +1295,10 @@ export const ScanConsole: React.FC<ScanConsoleProps> = ({
                 type="button"
                 onClick={handleConfirmAutomatedScan}
                 disabled={!consentOptIn || isScanning}
-                className={`btn py-2 px-5 text-xs font-semibold w-full sm:w-auto flex items-center justify-center gap-2 ${
-                  consentOptIn
-                    ? "btn-primary bg-amber-500 hover:bg-amber-400 text-black border-amber-400 font-bold"
-                    : "opacity-40 cursor-not-allowed bg-slate-800 text-slate-400"
-                }`}
+                className={`btn py-2 px-5 text-xs font-semibold w-full sm:w-auto flex items-center justify-center gap-2 ${consentOptIn
+                  ? "btn-primary bg-amber-500 hover:bg-amber-400 text-black border-amber-400 font-bold"
+                  : "opacity-40 cursor-not-allowed bg-slate-800 text-slate-400"
+                  }`}
               >
                 <Search className="w-3.5 h-3.5" />
                 <span>Authorize &amp; Execute Query</span>

@@ -30,6 +30,8 @@ from backend.app.engines.discovery.local_parsers import (
     parse_mbox_file,
     parse_sms_backup_file,
     analyze_single_sms,
+    OTP_PATTERN,
+    PROMO_PATTERN,
 )
 from backend.app.engines.remediation import (
     lookup_source_by_url,
@@ -647,12 +649,103 @@ def list_exposures_endpoint(identity_hmac: str):
     rows = cursor.fetchall()
     conn.close()
 
-    def _classify_stored_record(m_type: str, conf: float, ev_orig: str = "UNKNOWN", snip: str = "") -> Tuple[str, str, str, str]:
-        origin_req = format_evidence_requirement(ev_orig)
+    def _classify_stored_record(
+        m_type: str,
+        conf: float,
+        ev_orig: str = "UNKNOWN",
+        snip: str = "",
+        source_id: str = "",
+        domain: str = "",
+        title: str = "",
+    ) -> Tuple[str, str, str, str]:
+        # 1. Honest Local Origin Requirement
+        if ev_orig == "LOCAL_SMS_BACKUP":
+            origin_req = "Local device message archive. Incoming transmission to personal handset, not an external web exposure."
+        elif ev_orig == "LOCAL_EMAIL_ARCHIVE":
+            origin_req = "Local email archive. Stored in local mailbox, not a public directory exposure."
+        else:
+            origin_req = format_evidence_requirement(ev_orig)
+
         has_example = bool(EXAMPLE_PATTERN.search(snip or ""))
 
+        # 2. Local archive message classifications (SMS / On-device alerts)
+        is_local_sms = (
+            ev_orig == "LOCAL_SMS_BACKUP"
+            or (source_id and source_id.startswith("sms_"))
+            or (domain and domain.endswith(".dnd.local"))
+        )
+
+        if is_local_sms:
+            otp_match = bool(re.search(r"(?i)\b(otp|one[- ]time|verification code|is your code|auth code|secret code|passcode|pin\b)", snip or ""))
+            is_otp = (source_id == "sms_transactional_otp") or otp_match
+            is_tx = (
+                any(k in (source_id or "").lower() for k in ("banking", "shopping", "travel"))
+                or bool(re.search(r"(?i)\b(debited|credited|account|acct|txn|transaction|balance|inr|usd|rs\.?|order|delivery|shipped)\b", snip or ""))
+            ) and not is_otp
+            is_marketing = (
+                "marketing" in (source_id or "").lower()
+                or "promo" in (source_id or "").lower()
+                or bool(re.search(r"(?i)\b(offer|discount|sale|cashback|flat\s+\d+|pre-approved|loan|deal|coupon)\b", snip or ""))
+            ) and not is_otp
+            is_spam = "direct" in (source_id or "").lower() or "spam" in (source_id or "").lower() or "spam" in (domain or "").lower()
+
+            if is_otp:
+                m_class = "LOCAL_AUTH_OTP"
+                tier = "LOCAL_DEVICE_SMS"
+                core = "Private authentication / one-time password code received on device. This is a local incoming notification, not a public data broker exposure."
+                verif_text = "Local device message archive. No external removal notice required."
+            elif is_tx:
+                m_class = "LOCAL_TRANSACTIONAL"
+                tier = "LOCAL_DEVICE_SMS"
+                core = "Private transactional alert or service confirmation delivered to device."
+                verif_text = "Local device message archive. Legitimate merchant or banking service record."
+            elif is_marketing:
+                m_class = "LOCAL_MARKETING"
+                tier = "LOCAL_DEVICE_SMS"
+                core = "Commercial promotional communication delivered via enterprise telecom gateway (DLT header or shortcode)."
+                verif_text = "Local telecom record. Actionable via telecom DND (TRAI 1909 / Carrier STOP) rather than web broker takedown."
+            elif is_spam:
+                m_class = "SUSPECTED_SPAM"
+                tier = "LOCAL_DEVICE_SMS"
+                core = "Unsolicited commercial message or suspected spam from direct number."
+                verif_text = "Local device record. Actionable via carrier spam reporting (7726)."
+            else:
+                m_class = "LOCAL_MARKETING"
+                tier = "LOCAL_DEVICE_SMS"
+                core = "Commercial enterprise SMS communication."
+                verif_text = "Local device message archive."
+
+            full_expl = f"{core} Measures string match fidelity of local device record, not public breach severity. {verif_text}"
+            return m_class, full_expl, tier, verif_text
+
+        # 3. Public Web Sources
+        if m_type == "FALSE_POSITIVE":
+            m_class = "FALSE_POSITIVE"
+            tier = "NONE"
+            core = "Digit sequence identified as invoice, transaction ID, date, or UUID."
+            return m_class, core, tier, "Candidate discarded as false positive; no exposure created."
+
+        if has_example:
+            m_class = "INCIDENTAL_MENTION"
+            tier = "EXACT_CANONICAL" if m_type == "EXACT" else "UNFORMATTED_DIGITS"
+            core = "Exact or formatted telephone sequence appears within documentation, test fixtures, or sample context."
+            full_expl = f"{core} {origin_req}"
+            return m_class, full_expl, tier, origin_req
+
+        # Public corporate / support directory listings
+        is_public_contact = (
+            source_id == "public_contact"
+            or bool(re.search(r"(?i)\b(customer support directory|customer service hotline|toll-free customer support|toll-free helpline|official support helpline)\b", (title or "") + " " + (snip or "")))
+        )
+        if is_public_contact:
+            m_class = "PUBLIC_CONTACT"
+            tier = "EXACT_CANONICAL" if m_type == "EXACT" else "SPACED_NATIONAL"
+            core = "Public customer service or business support contact listing."
+            full_expl = f"{core} {origin_req}"
+            return m_class, full_expl, tier, origin_req
+
         if m_type == "EXACT":
-            if conf <= 0.75 or has_example:
+            if conf <= 0.75:
                 m_class = "INCIDENTAL_MENTION"
                 tier = "EXACT_CANONICAL"
                 core = "Exact telephone representation appears in documentation or test fixture context."
@@ -661,7 +754,7 @@ def list_exposures_endpoint(identity_hmac: str):
                 tier = "EXACT_CANONICAL"
                 core = "Exact verified telephone representation in plausible contact context."
         elif m_type == "PROBABLE":
-            if conf <= 0.75 or has_example:
+            if conf <= 0.75:
                 m_class = "INCIDENTAL_MENTION"
                 tier = "UNFORMATTED_DIGITS"
                 core = "Continuous digit sequence matching telephone length without explicit contact label."
@@ -677,11 +770,6 @@ def list_exposures_endpoint(identity_hmac: str):
             m_class = "INCONCLUSIVE"
             tier = "LOCAL_FRAGMENT"
             core = "Ambiguous local digit sequence lacking area code or explicit telephone designation."
-        elif m_type == "FALSE_POSITIVE":
-            m_class = "FALSE_POSITIVE"
-            tier = "NONE"
-            core = "Digit sequence identified as invoice, transaction ID, date, or UUID."
-            return m_class, core, tier, "Candidate discarded as false positive; no exposure created."
         else:
             m_class = "INCONCLUSIVE"
             tier = "NONE"
@@ -695,7 +783,15 @@ def list_exposures_endpoint(identity_hmac: str):
         canon_u = r["canonical_url"] if ("canonical_url" in r.keys() and r["canonical_url"]) else (canonicalize_url(r["url"]) or r["url"])
         ev_orig = r["evidence_origin"] if ("evidence_origin" in r.keys() and r["evidence_origin"]) else "UNKNOWN"
         snip = r["snippet"] or ""
-        match_class, conf_expl, tier, verif_req = _classify_stored_record(r["match_type"], float(r["confidence"]), ev_orig, snip)
+        match_class, conf_expl, tier, verif_req = _classify_stored_record(
+            r["match_type"],
+            float(r["confidence"]),
+            ev_orig,
+            snip,
+            source_id=r["source_id"] if "source_id" in r.keys() else "",
+            domain=r["domain"] if "domain" in r.keys() else "",
+            title=r["title"] if "title" in r.keys() else "",
+        )
         items.append(
             DiscoveredExposureItem(
                 id=r["id"],
@@ -1636,71 +1732,100 @@ async def import_sms_endpoint(
 
         if target_hmac:
             conn = get_db_connection()
-            cursor = conn.cursor()
-            now_iso = utc_now_iso()
+            try:
+                cursor = conn.cursor()
+                now_iso = utc_now_iso()
 
-            if norm and norm.hmac_id:
-                cursor.execute("""
-                    INSERT INTO identities (id, hmac_id, masked_phone, country_code, carrier_name, line_type, created_at)
-                    VALUES (?, ?, ?, ?, ?, ?, ?)
-                    ON CONFLICT(hmac_id) DO NOTHING
-                """, (
-                    str(uuid.uuid4()),
-                    norm.hmac_id,
-                    norm.masked_display,
-                    str(norm.country_code),
-                    norm.carrier_name,
-                    norm.line_type,
-                    now_iso,
-                ))
+                if norm and norm.hmac_id:
+                    cursor.execute("""
+                        INSERT INTO identities (id, hmac_id, masked_phone, country_code, carrier_name, line_type, created_at)
+                        VALUES (?, ?, ?, ?, ?, ?, ?)
+                        ON CONFLICT(hmac_id) DO NOTHING
+                    """, (
+                        str(uuid.uuid4()),
+                        norm.hmac_id,
+                        norm.masked_display,
+                        str(norm.country_code),
+                        norm.carrier_name,
+                        norm.line_type,
+                        now_iso,
+                    ))
 
-            for s in senders:
-                exp_id = str(uuid.uuid4())
-                safe_brand = re.sub(r'[^a-zA-Z0-9.-]', '', (s.brand_name or s.sender_number).lower())
-                clean_u = f"https://{safe_brand or 'telecom'}.dnd.local/optout"
-                canon_u = clean_u
-                domain = (s.brand_name or s.sender_number).lower()
+                for s in senders:
+                    exp_id = str(uuid.uuid4())
+                    safe_brand = re.sub(r'[^a-zA-Z0-9.-]', '', (s.brand_name or s.sender_number).lower())
+                    clean_u = f"https://{safe_brand or 'telecom'}.dnd.local/optout"
+                    canon_u = clean_u
+                    domain = (s.brand_name or s.sender_number).lower()
 
-                cursor.execute("""
-                    INSERT INTO exposures (
-                        id, identity_hmac, source_id, url, canonical_url, evidence_origin,
-                        domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    exp_id,
-                    target_hmac,
-                    f"sms_{s.category.lower()}",
-                    clean_u,
-                    canon_u,
-                    "FETCHED_PAGE",
-                    domain,
-                    f"Commercial SMS: {s.brand_name or s.sender_number} ({s.category})",
-                    "EXACT",
-                    0.95,
-                    s.sample_body or f"SMS Header: {s.sender_number} ({s.brand_name})",
-                    now_iso,
-                    now_iso,
-                ))
+                    # Semantic classification for local SMS
+                    is_otp = (s.category == "TRANSACTIONAL_OTP") or bool(OTP_PATTERN.search(s.sample_body or ""))
+                    is_tx = any(k in (s.category or "").upper() for k in ("BANKING", "SHOPPING", "TRAVEL")) and not is_otp and not bool(PROMO_PATTERN.search(s.sample_body or ""))
+                    is_marketing = (s.category == "MARKETING_SMS") or bool(PROMO_PATTERN.search(s.sample_body or ""))
+                    is_spam = (s.category == "DIRECT_NUMBER" and bool(PROMO_PATTERN.search(s.sample_body or ""))) or ("spam" in (s.category or "").lower())
 
-                action_id = str(uuid.uuid4())
-                cursor.execute("""
-                    INSERT INTO remediation_actions (
-                        id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                """, (
-                    action_id,
-                    exp_id,
-                    target_hmac,
-                    f"sms_{s.category.lower()}",
-                    "ACTION_AVAILABLE",
-                    clean_u,
-                    f"Imported from SMS backup ({file.filename})",
-                    now_iso,
-                ))
-                exposures_created += 1
+                    if is_otp:
+                        title_type = "Authentication Code"
+                        rem_status = "INFORMATIONAL"
+                        official_url = None
+                        act_notes = f"Local on-device SMS archive ({file.filename}): Authentication / OTP code. Private handset notification, not an external broker exposure."
+                    elif is_tx:
+                        title_type = "Transactional Alert"
+                        rem_status = "INFORMATIONAL"
+                        official_url = None
+                        act_notes = f"Local on-device SMS archive ({file.filename}): Transactional alert or service confirmation."
+                    elif is_spam:
+                        title_type = "Suspected Spam"
+                        rem_status = "ACTION_AVAILABLE"
+                        official_url = clean_u
+                        act_notes = f"Local on-device SMS archive ({file.filename}): Direct number commercial spam. Carrier 7726 report available."
+                    else:
+                        title_type = "Commercial Marketing"
+                        rem_status = "ACTION_AVAILABLE"
+                        official_url = clean_u
+                        act_notes = f"Local on-device SMS archive ({file.filename}): {s.recommended_action or 'TRAI 1909 DND complaint / Carrier opt-out'}"
 
-            conn.commit()
-            conn.close()
+                    cursor.execute("""
+                        INSERT INTO exposures (
+                            id, identity_hmac, source_id, url, canonical_url, evidence_origin,
+                            domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        exp_id,
+                        target_hmac,
+                        f"sms_{s.category.lower()}",
+                        clean_u,
+                        canon_u,
+                        "LOCAL_SMS_BACKUP",
+                        domain,
+                        f"Local SMS: {s.brand_name or s.sender_number} ({title_type})",
+                        "EXACT",
+                        0.95,
+                        s.sample_body or f"SMS Header: {s.sender_number} ({s.brand_name})",
+                        now_iso,
+                        now_iso,
+                    ))
+
+                    action_id = str(uuid.uuid4())
+                    cursor.execute("""
+                        INSERT INTO remediation_actions (
+                            id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        action_id,
+                        exp_id,
+                        target_hmac,
+                        f"sms_{s.category.lower()}",
+                        rem_status,
+                        official_url,
+                        act_notes,
+                        now_iso,
+                    ))
+                    exposures_created += 1
+
+                conn.commit()
+            finally:
+                conn.close()
 
         return {
             "success": True,
@@ -1957,7 +2082,7 @@ def export_audit_endpoint(identity_hmac: str):
 # --- 7. Synthetic Demo Scenario Loader ---
 
 @router.post("/demo/synthetic")
-def load_synthetic_scenario_endpoint():
+def load_synthetic_scenario_endpoint(include_local: bool = False):
     """Loads a realistic synthetic scenario for testing and verification without using real data."""
     init_db()
     # Use standard fictional number
@@ -2052,6 +2177,36 @@ def load_synthetic_scenario_endpoint():
         ),
     ]
 
+    if include_local:
+        fixtures.extend([
+            (
+                "public_contact",
+                "https://help.acme-corp.internal/customer-support",
+                "acme-corp.internal",
+                "Acme Corp Customer Support Directory & Toll-Free Helpline",
+                "EXACT",
+                1.0,
+                "Need assistance with your account? Reach our official toll-free customer support helpline: +1 (415) 555-2671. Available 24/7.",
+                "ACTION_AVAILABLE",
+                "https://acme-corp.internal/privacy-policy",
+                None,
+                "Corporate customer support directory listing.",
+            ),
+            (
+                "sms_transactional_otp",
+                "https://uber.dnd.local/optout",
+                "uber.dnd.local",
+                "Local SMS: Uber (Authentication Code)",
+                "EXACT",
+                0.95,
+                "Your Uber verification code is 4921. Never share this code with anyone. Sent to +1 415 555 2671.",
+                "INFORMATIONAL",
+                None,
+                None,
+                "Local on-device SMS archive: Authentication / OTP code. Private handset notification, not an external broker exposure.",
+            ),
+        ])
+
     for source_id, url, domain, title, match_type, conf, snippet, status, rem_url, sub_ref, notes in fixtures:
         canon_url = canonicalize_url(url) or url
         cursor.execute("SELECT id FROM exposures WHERE identity_hmac = ? AND (canonical_url = ? OR url = ?)", (norm.hmac_id, canon_url, url))
@@ -2065,7 +2220,12 @@ def load_synthetic_scenario_endpoint():
         else:
             exp_id = str(uuid.uuid4())
             # Assign realistic evidence origins across fixtures
-            f_origin = "ARCHIVED_SNAPSHOT" if "archive" in url or "archive" in source_id else ("FETCHED_PAGE" if "github" in source_id or "pastebin" in source_id else "SEARCH_SNIPPET")
+            f_origin = (
+                "LOCAL_SMS_BACKUP" if (source_id.startswith("sms_") or "dnd.local" in url)
+                else "FETCHED_PAGE" if (source_id == "public_contact" or "github" in source_id or "pastebin" in source_id)
+                else "ARCHIVED_SNAPSHOT" if ("archive" in url or "archive" in source_id)
+                else "SEARCH_SNIPPET"
+            )
             cursor.execute("""
                 INSERT INTO exposures (
                     id, identity_hmac, source_id, url, canonical_url, evidence_origin, domain, title, match_type, confidence, snippet, discovered_at, last_checked_at

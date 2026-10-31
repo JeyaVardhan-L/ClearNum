@@ -378,14 +378,14 @@ export async function exportAuditReport(identityHmac: string): Promise<any> {
   return res.json();
 }
 
-export async function loadSyntheticDemo(): Promise<{
+export async function loadSyntheticDemo(includeLocal: boolean = true): Promise<{
   success: boolean;
   message: string;
   identity_hmac: string;
   masked_phone: string;
   exposures_count: number;
 }> {
-  const res = await fetch(`${API_BASE}/demo/synthetic`, { method: "POST" });
+  const res = await fetch(`${API_BASE}/demo/synthetic?include_local=${includeLocal}`, { method: "POST" });
   if (!res.ok) throw new Error(await res.text());
   return res.json();
 }

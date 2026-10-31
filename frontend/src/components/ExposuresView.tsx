@@ -16,6 +16,9 @@ import {
   Clock,
   ArrowRight,
   X,
+  Lock,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import type { DiscoveredExposure, PhoneParseResult, RemediationHistory } from "../types";
 import { transitionAction, verifyExposure, getRemediationHistory } from "../api";
@@ -106,6 +109,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
   const [classificationFilter, setClassificationFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [revealDigits, setRevealDigits] = useState<boolean>(false);
   const [inspectingExposure, setInspectingExposure] = useState<DiscoveredExposure | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [verificationFeedback, setVerificationFeedback] = useState<{
@@ -163,7 +167,12 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     const matchesStatus = statusFilter === "ALL" || exp.remediation_status === statusFilter;
     const matchesClassification =
       classificationFilter === "ALL" ||
-      (classificationFilter === "CONFIRMED_MATCH" && (exp.match_classification === "CONFIRMED_MATCH" || exp.match_type === "EXACT")) ||
+      (classificationFilter === "CONFIRMED_MATCH" && (exp.match_classification === "CONFIRMED_MATCH" || exp.match_classification === "PUBLIC_EXPOSURE" || exp.match_type === "EXACT")) ||
+      (classificationFilter === "PUBLIC_CONTACT" && exp.match_classification === "PUBLIC_CONTACT") ||
+      (classificationFilter === "LOCAL_AUTH_OTP" && exp.match_classification === "LOCAL_AUTH_OTP") ||
+      (classificationFilter === "LOCAL_TRANSACTIONAL" && exp.match_classification === "LOCAL_TRANSACTIONAL") ||
+      (classificationFilter === "LOCAL_MARKETING" && exp.match_classification === "LOCAL_MARKETING") ||
+      (classificationFilter === "SUSPECTED_SPAM" && exp.match_classification === "SUSPECTED_SPAM") ||
       (classificationFilter === "POSSIBLE_MATCH" && (exp.match_classification === "POSSIBLE_MATCH" || exp.match_type === "PROBABLE")) ||
       (classificationFilter === "INCIDENTAL_MENTION" && exp.match_classification === "INCIDENTAL_MENTION") ||
       (classificationFilter === "INCONCLUSIVE" && (exp.match_classification === "INCONCLUSIVE" || exp.match_type === "WEAK")) ||
@@ -297,7 +306,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/40 border border-emerald-800/40 text-emerald-400 inline-flex items-center gap-1"
             title="Live page content was retrieved and verified directly"
           >
-            ● Fetched Page Body
+            ● Live Page
           </span>
         );
       case "ARCHIVED_SNAPSHOT":
@@ -315,7 +324,25 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-400 inline-flex items-center gap-1"
             title="Match found only in search engine snippet. Page body has not been fetched."
           >
-            🔍 Search Snippet Only
+            🔍 Search Snippet
+          </span>
+        );
+      case "LOCAL_SMS_BACKUP":
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-sky-950/40 border border-sky-800/40 text-sky-400 inline-flex items-center gap-1"
+            title="Local device SMS backup archive. Private message on user device, not an external web exposure."
+          >
+            📱 Local SMS
+          </span>
+        );
+      case "LOCAL_EMAIL_ARCHIVE":
+        return (
+          <span
+            className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-indigo-950/40 border border-indigo-800/40 text-indigo-300 inline-flex items-center gap-1"
+            title="Local email archive. Stored in local mailbox, not a public directory exposure."
+          >
+            ✉️ Local Mailbox
           </span>
         );
       case "UNKNOWN":
@@ -335,31 +362,62 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     const classType = classification || (matchType === "EXACT" ? "CONFIRMED_MATCH" : matchType === "PROBABLE" ? "POSSIBLE_MATCH" : "INCONCLUSIVE");
 
     let badge;
+    let sublabel: React.ReactNode = null;
     switch (classType) {
       case "CONFIRMED_MATCH":
         badge = <span className="status-pill pill-pixel-green font-mono text-[10px]">Exact Match (Confirmed)</span>;
+        sublabel = <span className="text-[9px] font-mono text-emerald-400/90">Public Exposure</span>;
+        break;
+      case "PUBLIC_EXPOSURE":
+        badge = <span className="status-pill pill-pixel-green font-mono text-[10px]">Exact Match (Public Exposure)</span>;
+        sublabel = <span className="text-[9px] font-mono text-emerald-400/90">Data Broker Directory</span>;
+        break;
+      case "PUBLIC_CONTACT":
+        badge = <span className="status-pill font-mono text-[10px] bg-emerald-950/50 text-emerald-300 border border-emerald-700/50">Public Contact Listing</span>;
+        sublabel = <span className="text-[9px] font-mono text-[var(--text-dim)]">Business Support / Helpline</span>;
+        break;
+      case "LOCAL_AUTH_OTP":
+        badge = <span className="status-pill font-mono text-[10px] bg-sky-950/50 text-sky-300 border border-sky-700/50">Authentication Code (OTP)</span>;
+        sublabel = <span className="text-[9px] font-mono text-sky-400">Local Device · Not an Exposure</span>;
+        break;
+      case "LOCAL_TRANSACTIONAL":
+        badge = <span className="status-pill font-mono text-[10px] bg-slate-800 text-slate-300 border border-slate-700">Transactional Notification</span>;
+        sublabel = <span className="text-[9px] font-mono text-slate-400">Bank / Order Notification</span>;
+        break;
+      case "LOCAL_MARKETING":
+        badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px] bg-amber-950/40 text-amber-300 border border-amber-700/50">Commercial Marketing SMS</span>;
+        sublabel = <span className="text-[9px] font-mono text-amber-400">DLT Telecom Header</span>;
+        break;
+      case "SUSPECTED_SPAM":
+        badge = <span className="status-pill pill-pixel-red font-mono text-[10px] bg-red-950/40 text-red-300 border border-red-700/50">Suspected Spam Message</span>;
+        sublabel = <span className="text-[9px] font-mono text-red-400">Unsolicited / Suspicious</span>;
         break;
       case "POSSIBLE_MATCH":
         badge = <span className="status-pill pill-pixel-cyan font-mono text-[10px]">Probable Match</span>;
+        sublabel = <span className="text-[9px] font-mono text-[var(--text-dim)]">Formatted Number Pattern</span>;
         break;
       case "INCIDENTAL_MENTION":
         badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px]">Incidental Mention</span>;
+        sublabel = <span className="text-[9px] font-mono text-[var(--text-dim)]">Forum / Documentation</span>;
         break;
       case "INCONCLUSIVE":
         badge = <span className="status-pill pill-pixel-yellow font-mono text-[10px] text-amber-400">Inconclusive Fragment</span>;
+        sublabel = <span className="text-[9px] font-mono text-[var(--text-dim)]">Partial Digit Sequence</span>;
         break;
       case "FALSE_POSITIVE":
         badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">False Positive</span>;
+        sublabel = <span className="text-[9px] font-mono text-purple-400">UUID / Date / Invoice</span>;
         break;
       default:
         badge = <span className="status-pill pill-pixel-purple font-mono text-[10px]">{matchType}</span>;
     }
 
     return (
-      <div className="flex flex-col gap-1 items-start">
+      <div className="flex flex-col gap-0.5 items-start">
         {badge}
+        {sublabel}
         {isExample && (
-          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300">
+          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/40 border border-amber-800/40 text-amber-300 mt-0.5">
             Documentation / Dummy
           </span>
         )}
@@ -416,6 +474,13 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
         return (
           <span className="status-pill pill-pixel-green">
             <ShieldCheck className="w-3 h-3" /> Opt-Out Available
+          </span>
+        );
+      case "INFORMATIONAL":
+      case "NO_ACTION_REQUIRED":
+        return (
+          <span className="status-pill font-mono text-[10px] bg-sky-950/40 text-sky-300 border border-sky-800/40">
+            <CheckCircle2 className="w-3 h-3 text-sky-400" /> Local Notification Only
           </span>
         );
       case "REJECTED_MATCH":
@@ -494,8 +559,30 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
       {/* Header Bar */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2 mb-1">
+          <div className="flex items-center gap-2 mb-1 flex-wrap">
             <span className="kicker-tag">[ AUDIT INVENTORY ]</span>
+            {currentIdentity && (
+              <div className="flex items-center gap-1.5 px-2 py-0.5 rounded bg-[var(--bg-surface)] border border-[var(--border-subtle)] font-mono text-[11px] text-[var(--text-main)]">
+                <Lock className="w-3 h-3 text-[var(--pixel-green)]" />
+                <span>{revealDigits ? (currentIdentity.e164 || currentIdentity.masked_display) : currentIdentity.masked_display}</span>
+                <button
+                  type="button"
+                  onClick={() => setRevealDigits(!revealDigits)}
+                  className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-0.5"
+                  title={revealDigits ? "Mask telephone digits" : "Reveal raw digits"}
+                  aria-label={revealDigits ? "Mask telephone digits" : "Reveal raw digits"}
+                >
+                  {revealDigits ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+                </button>
+                <button
+                  type="button"
+                  onClick={onNavigateToScan}
+                  className="text-[10px] text-[var(--pixel-cyan)] hover:underline ml-1"
+                >
+                  Edit
+                </button>
+              </div>
+            )}
           </div>
           <h2 className="text-lg font-bold text-[var(--text-main)] flex items-center gap-2">
             <ShieldAlert className="w-5 h-5 text-[var(--pixel-yellow)]" />
@@ -544,11 +631,16 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             <select
               value={classificationFilter}
               onChange={(e) => setClassificationFilter(e.target.value)}
-              className="input-field py-1.5 text-xs min-w-[150px]"
+              className="input-field py-1.5 text-xs min-w-[160px]"
               aria-label="Filter by Match Classification"
             >
               <option value="ALL">All Classifications</option>
               <option value="CONFIRMED_MATCH">Confirmed Matches</option>
+              <option value="PUBLIC_CONTACT">Public Contact Listings</option>
+              <option value="LOCAL_AUTH_OTP">Authentication Codes (OTP)</option>
+              <option value="LOCAL_TRANSACTIONAL">Transactional Alerts</option>
+              <option value="LOCAL_MARKETING">Commercial Marketing SMS</option>
+              <option value="SUSPECTED_SPAM">Suspected Spam</option>
               <option value="POSSIBLE_MATCH">Probable Match</option>
               <option value="INCIDENTAL_MENTION">Incidental Mention</option>
               <option value="INCONCLUSIVE">Inconclusive Fragment</option>
@@ -671,22 +763,22 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
       ) : (
         <div className="card overflow-hidden">
           <div className="overflow-x-auto">
-            <table className="data-table">
+            <table className="data-table mobile-card-table">
               <thead>
                 <tr>
-                  <th style={{ width: "20%" }}>SOURCE / DOMAIN</th>
-                  <th style={{ width: "32%" }}>INDEXED LISTING SNIPPET</th>
-                  <th style={{ width: "14%" }}>MATCH CONFIDENCE</th>
-                  <th style={{ width: "14%" }}>LIFECYCLE STATE</th>
-                  <th style={{ width: "20%", textAlign: "right", whiteSpace: "nowrap" }}>ACTIONS</th>
+                  <th className="min-w-[170px]">SOURCE / TARGET</th>
+                  <th className="min-w-[260px]">EVIDENCE CONTEXT</th>
+                  <th className="min-w-[170px]">MATCH FIDELITY</th>
+                  <th className="min-w-[150px]">LIFECYCLE STATUS</th>
+                  <th className="min-w-[310px] text-right">ACTIONS</th>
                 </tr>
               </thead>
               <tbody>
                 {filteredExposures.map((exp) => (
                   <tr key={exp.id}>
                     {/* Domain & URL */}
-                    <td>
-                      <div className="font-semibold text-xs text-[var(--text-main)] flex items-center gap-1.5">
+                    <td className="align-top">
+                      <div className="font-semibold text-xs text-[var(--text-main)] flex items-center gap-1.5 flex-wrap">
                         <span>{exp.domain}</span>
                         <a
                           href={exp.url}
@@ -702,7 +794,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                         className="font-mono text-[10px] text-[var(--text-dim)] truncate max-w-xs mt-0.5"
                         title={exp.canonical_url || exp.url}
                       >
-                        <span className="text-[var(--text-dim)]">Canonical: </span>
+                        <span className="text-[var(--text-dim)]">Target: </span>
                         {exp.canonical_url || exp.url}
                       </div>
                       <div className="text-[10px] text-[var(--text-dim)] mt-0.5 flex items-center gap-2 flex-wrap">
@@ -717,73 +809,59 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     </td>
 
                     {/* Snippet & Evidence */}
-                    <td>
-                      <div className="text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed font-mono">
+                    <td className="align-top">
+                      <div
+                        className="text-xs text-[var(--text-muted)] line-clamp-2 leading-relaxed font-mono cursor-pointer hover:text-[var(--text-main)] transition-colors"
+                        onClick={() => setInspectingExposure(exp)}
+                        title="Click to view complete evidence in Details modal"
+                      >
                         {exp.snippet || "No textual context snippet available."}
                       </div>
-                      <div className="text-[10px] text-[var(--text-dim)] mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+                      <div className="text-[10px] text-[var(--text-dim)] mt-1.5 flex flex-wrap items-center gap-x-2.5 gap-y-1">
                         <div>
-                          Matched: <span className="font-mono text-[var(--pixel-cyan)] font-semibold">{exp.matched_representation || currentIdentity?.masked_display || "Masked"}</span>
+                          Matched: <span className="font-mono text-[var(--pixel-cyan)] font-semibold">{revealDigits ? (exp.matched_representation || currentIdentity?.e164 || "Masked") : (currentIdentity?.masked_display || "Masked")}</span>
                         </div>
+                        <span className="hidden sm:inline">•</span>
                         <div>
                           Source: <span className="text-[var(--pixel-cyan)] font-mono">{exp.source_id}</span>
                         </div>
+                        <span className="hidden sm:inline">•</span>
                         <div className="flex items-center gap-1">
-                          <span className="text-[var(--text-dim)]">Origin:</span>
                           {getEvidenceOriginBadge(exp.evidence_origin)}
                         </div>
                       </div>
-
-                      {/* Honest Evidence Origin & Verification Limitations Callout */}
-                      {exp.evidence_origin === "SEARCH_SNIPPET" && (
-                        <div className="text-[10px] text-amber-400/90 bg-amber-950/20 border border-amber-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
-                          <AlertTriangle className="w-2.5 h-2.5 text-amber-400 shrink-0" />
-                          <span>Snippet only — live page uninspected</span>
-                        </div>
-                      )}
-                      {exp.evidence_origin === "ARCHIVED_SNAPSHOT" && (
-                        <div className="text-[10px] text-purple-300/90 bg-purple-950/20 border border-purple-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
-                          <Clock className="w-2.5 h-2.5 text-purple-400 shrink-0" />
-                          <span>Historical snapshot — current exposure unconfirmed</span>
-                        </div>
-                      )}
-                      {exp.evidence_origin === "FETCHED_PAGE" && (
-                        <div className="text-[10px] text-emerald-400/90 bg-emerald-950/20 border border-emerald-900/30 rounded px-2 py-0.5 mt-1.5 flex items-center gap-1.5 font-mono">
-                          <CheckCircle2 className="w-2.5 h-2.5 text-emerald-400 shrink-0" />
-                          <span>Live page body inspected: presence confirmed</span>
-                        </div>
-                      )}
-
-                      {exp.confidence_explanation && (
-                        <div className="text-[10px] text-[var(--text-dim)] mt-1.5 leading-relaxed bg-[var(--bg-card)]/50 p-1.5 rounded border border-[var(--border-subtle)]">
-                          <span className="text-[var(--text-muted)] font-semibold">Evaluation: </span>
-                          {exp.confidence_explanation}
-                        </div>
-                      )}
+                      <button
+                        type="button"
+                        onClick={() => setInspectingExposure(exp)}
+                        className="text-[10px] text-[var(--pixel-cyan)] hover:underline mt-1 font-mono inline-flex items-center gap-1"
+                      >
+                        Inspect context &amp; evidence →
+                      </button>
                     </td>
 
                     {/* Match Confidence & Classification */}
-                    <td>
+                    <td className="align-top">
                       <div className="space-y-1">
                         {getMatchBadge(exp.match_type, exp.match_classification, exp.is_example_or_test, exp.matched_tier)}
-                        <div className="text-[10px] text-[var(--text-dim)] font-mono flex items-center gap-1.5 mt-0.5">
-                          <span>Confidence:</span>
+                        <div className="text-[10px] text-[var(--text-dim)] font-mono flex items-center gap-1 mt-1">
+                          <span>Fidelity:</span>
                           <span className="font-semibold text-[var(--text-main)]">{(exp.confidence * 100).toFixed(0)}%</span>
+                          <span className="text-[9px] text-[var(--text-dim)]">(heuristic)</span>
                         </div>
-                        <div className="text-[9px] text-[var(--text-dim)] font-mono">
+                        <div className="text-[9px] text-[var(--text-dim)] font-mono" title="Heuristic pattern match strength (string/formatting integrity), not statistical risk of harm.">
                           {exp.confidence >= 0.95
-                            ? "High Confidence"
+                            ? "High Pattern Match"
                             : exp.confidence >= 0.80
-                            ? "Medium-High"
+                            ? "Medium-High Match"
                             : exp.confidence >= 0.65
-                            ? "Medium Confidence"
+                            ? "Medium Pattern Match"
                             : "Low / Inconclusive"}
                         </div>
                       </div>
                     </td>
 
                     {/* Lifecycle Status */}
-                    <td>
+                    <td className="align-top">
                       <div className="space-y-1">
                         {getStatusBadge(exp.remediation_status)}
                         {exp.official_removal_url && (
@@ -791,7 +869,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                             href={exp.official_removal_url}
                             target="_blank"
                             rel="noopener noreferrer"
-                            className="text-[10px] text-[var(--pixel-green)] hover:underline flex items-center gap-1 mt-0.5"
+                            className="text-[10px] text-[var(--pixel-green)] hover:underline flex items-center gap-1 mt-1"
                           >
                             <span>Official Opt-Out Link</span>
                             <ExternalLink className="w-2.5 h-2.5" />
@@ -801,8 +879,8 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     </td>
 
                     {/* Actions */}
-                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                      <div className="flex items-center justify-end gap-1.5 flex-nowrap">
+                    <td className="align-top text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5 flex-wrap sm:flex-nowrap">
                         <button
                           type="button"
                           onClick={() => setInspectingExposure(exp)}
@@ -847,22 +925,33 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                             setTransitionNotes("");
                             setTransitionError(null);
                           }}
-                          className="btn btn-secondary py-1 px-2.5 text-[11px] font-semibold shrink-0"
+                          className="btn btn-secondary py-1 px-2 text-[11px] font-semibold shrink-0"
                           title="Update truthful lifecycle state"
                         >
                           <SlidersHorizontal className="w-3 h-3 text-[var(--pixel-cyan)]" />
                           <span>Update</span>
                         </button>
 
-                        <button
-                          type="button"
-                          onClick={() => onOpenRemediation(exp.source_id, exp.id)}
-                          className="btn btn-primary py-1 px-2.5 text-[11px] shrink-0 font-semibold flex items-center gap-1"
-                          title="Generate removal notice or statutory demand"
-                        >
-                          <FileText className="w-3 h-3 text-[#022c22]" />
-                          <span>Remediate</span>
-                        </button>
+                        {exp.match_classification === "LOCAL_AUTH_OTP" || exp.remediation_status === "INFORMATIONAL" ? (
+                          <button
+                            type="button"
+                            onClick={() => setInspectingExposure(exp)}
+                            className="btn btn-secondary py-1 px-2.5 text-[11px] shrink-0 font-medium text-sky-400 border-sky-800/40"
+                            title="Private on-device OTP / notification — no external broker removal needed"
+                          >
+                            <span>Local Info</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => onOpenRemediation(exp.source_id, exp.id)}
+                            className="btn btn-primary py-1 px-2.5 text-[11px] shrink-0 font-semibold flex items-center gap-1"
+                            title="Generate removal notice or statutory demand"
+                          >
+                            <FileText className="w-3 h-3 text-[#022c22]" />
+                            <span>Remediate</span>
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -1375,8 +1464,12 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     )}
                   </div>
                   <div className="font-mono text-xs text-[var(--pixel-green)] font-semibold">
-                    Confidence: {(inspectingExposure.confidence * 100).toFixed(0)}% ({inspectingExposure.match_type})
+                    Match Fidelity: {(inspectingExposure.confidence * 100).toFixed(0)}% (Heuristic Pattern Match)
                   </div>
+                </div>
+
+                <div className="p-2.5 rounded bg-blue-950/20 border border-blue-900/30 text-[11px] text-blue-200 leading-relaxed">
+                  <strong>ℹ️ Heuristic Match Fidelity vs. Harm Probability:</strong> This percentage reflects how accurately the candidate string matches your normalized telephone structure. It measures pattern fidelity, NOT exposure severity, risk probability, or personal breach likelihood.
                 </div>
 
                 <div className="text-[11px] text-[var(--text-muted)] bg-[var(--bg-card)] p-2.5 rounded border border-[var(--border-subtle)] space-y-1">
@@ -1385,7 +1478,7 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     {inspectingExposure.confidence_explanation || getLifecycleExplanation(inspectingExposure.remediation_status)}
                   </div>
                   <div className="font-mono text-[10px] text-[var(--text-dim)]">
-                    Matched Representation: <span className="text-[var(--pixel-cyan)] font-semibold">{inspectingExposure.matched_representation || currentIdentity?.masked_display || "Masked Phone"}</span>
+                    Matched Representation: <span className="text-[var(--pixel-cyan)] font-semibold">{revealDigits ? (inspectingExposure.matched_representation || currentIdentity?.e164 || "Masked Phone") : (currentIdentity?.masked_display || "Masked Phone")}</span>
                   </div>
                 </div>
               </div>
@@ -1417,6 +1510,16 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                     <div className="text-purple-300 bg-purple-950/20 border-purple-800/40 p-2 rounded">
                       <strong className="text-purple-200">🕒 Historical Archive Snapshot: </strong>
                       This match appeared in an Internet Archive (Wayback Machine) CDX record. Historical visibility does not prove current live exposure.
+                    </div>
+                  ) : inspectingExposure.evidence_origin === "LOCAL_SMS_BACKUP" ? (
+                    <div className="text-sky-300 bg-sky-950/20 border-sky-800/40 p-2 rounded">
+                      <strong className="text-sky-200">📱 Local Device SMS Archive: </strong>
+                      Extracted from an authorized local SMS backup on your personal device. Represents an incoming message to your handset, not a public web leak or data broker exposure.
+                    </div>
+                  ) : inspectingExposure.evidence_origin === "LOCAL_EMAIL_ARCHIVE" ? (
+                    <div className="text-indigo-300 bg-indigo-950/20 border-indigo-800/40 p-2 rounded">
+                      <strong className="text-indigo-200">✉️ Local Mailbox Archive: </strong>
+                      Parsed from an authorized local MBOX email archive on your personal machine. Stored privately in your mailbox, not indexed publicly.
                     </div>
                   ) : (
                     <div className="text-zinc-300 bg-zinc-900 border-zinc-700 p-2 rounded">
@@ -1527,18 +1630,28 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                   <span>Record Submission</span>
                 </button>
 
-                <button
-                  type="button"
-                  onClick={() => {
-                    const exp = inspectingExposure;
-                    setInspectingExposure(null);
-                    onOpenRemediation(exp.source_id, exp.id);
-                  }}
-                  className="btn btn-primary py-1.5 px-3.5 text-xs font-semibold flex items-center gap-1.5"
-                >
-                  <FileText className="w-3.5 h-3.5 text-[#022c22]" />
-                  <span>Prepare Statutory Notice</span>
-                </button>
+                {inspectingExposure.match_classification === "LOCAL_AUTH_OTP" || inspectingExposure.remediation_status === "INFORMATIONAL" ? (
+                  <button
+                    type="button"
+                    onClick={() => setInspectingExposure(null)}
+                    className="btn btn-secondary py-1.5 px-3.5 text-xs font-semibold text-sky-400 border-sky-800/40"
+                  >
+                    <span>Done (Private On-Device Code)</span>
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const exp = inspectingExposure;
+                      setInspectingExposure(null);
+                      onOpenRemediation(exp.source_id, exp.id);
+                    }}
+                    className="btn btn-primary py-1.5 px-3.5 text-xs font-semibold flex items-center gap-1.5"
+                  >
+                    <FileText className="w-3.5 h-3.5 text-[#022c22]" />
+                    <span>Prepare Statutory Notice</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

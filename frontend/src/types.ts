@@ -44,9 +44,20 @@ export interface DiscoveredExposure {
   official_removal_url?: string;
   match_rationale?: string;
   canonical_url?: string;
-  evidence_origin?: "SEARCH_SNIPPET" | "FETCHED_PAGE" | "ARCHIVED_SNAPSHOT" | "UNKNOWN" | string;
+  evidence_origin?: "SEARCH_SNIPPET" | "FETCHED_PAGE" | "ARCHIVED_SNAPSHOT" | "LOCAL_SMS_BACKUP" | "LOCAL_EMAIL_ARCHIVE" | "UNKNOWN" | string;
   matched_representation?: string;
-  match_classification?: "CONFIRMED_MATCH" | "POSSIBLE_MATCH" | "INCIDENTAL_MENTION" | "INCONCLUSIVE" | "FALSE_POSITIVE";
+  match_classification?:
+    | "CONFIRMED_MATCH"
+    | "POSSIBLE_MATCH"
+    | "INCIDENTAL_MENTION"
+    | "INCONCLUSIVE"
+    | "FALSE_POSITIVE"
+    | "PUBLIC_CONTACT"
+    | "PUBLIC_EXPOSURE"
+    | "LOCAL_AUTH_OTP"
+    | "LOCAL_TRANSACTIONAL"
+    | "LOCAL_MARKETING"
+    | "SUSPECTED_SPAM";
   confidence_explanation?: string;
   provider_status?: string;
   is_example_or_test?: boolean;

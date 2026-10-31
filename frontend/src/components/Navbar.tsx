@@ -1,5 +1,5 @@
-import React from "react";
-import { Shield, Trash2, Play, Lock, Zap, Bug } from "lucide-react";
+import React, { useState } from "react";
+import { Shield, Trash2, Play, Lock, Zap, Bug, Eye, EyeOff } from "lucide-react";
 import type { PhoneParseResult } from "../types";
 
 interface NavbarProps {
@@ -25,6 +25,7 @@ export const Navbar: React.FC<NavbarProps> = ({
   activeTab,
   setActiveTab,
 }) => {
+  const [isRevealed, setIsRevealed] = useState(false);
   return (
     <header className="border-b border-[var(--border-subtle)] bg-[var(--bg-surface)] sticky top-0 z-40">
       <div className="container-shell flex flex-wrap items-center justify-between gap-y-2.5 gap-x-3 py-2.5 md:py-0 md:h-16">
@@ -54,8 +55,17 @@ export const Navbar: React.FC<NavbarProps> = ({
             <div className="hidden sm:flex items-center gap-2 px-2.5 py-1.5 rounded-md border border-[var(--border-subtle)] bg-[var(--bg-input)] whitespace-nowrap shrink-0">
               <Lock className="w-3.5 h-3.5 text-[var(--pixel-green)]" />
               <span className="font-mono-ui text-xs text-[var(--text-main)] whitespace-nowrap">
-                {currentIdentity.masked_display}
+                {isRevealed ? currentIdentity.e164 : currentIdentity.masked_display}
               </span>
+              <button
+                type="button"
+                onClick={() => setIsRevealed(!isRevealed)}
+                className="text-[var(--text-dim)] hover:text-[var(--text-main)] transition-colors p-0.5"
+                title={isRevealed ? "Mask telephone digits" : "Reveal raw telephone digits"}
+                aria-label={isRevealed ? "Mask telephone digits" : "Reveal raw telephone digits"}
+              >
+                {isRevealed ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
+              </button>
               <span className="kicker-tag text-[9px] px-1.5 py-0.5">
                 HMAC
               </span>
