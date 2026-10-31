@@ -32,6 +32,7 @@ import {
 interface RemediationHubProps {
   currentIdentity: PhoneParseResult | null;
   selectedSourceId?: string;
+  selectedExposureId?: string;
   exposures?: DiscoveredExposure[];
   onRefresh?: () => void;
 }
@@ -39,6 +40,7 @@ interface RemediationHubProps {
 export const RemediationHub: React.FC<RemediationHubProps> = ({
   currentIdentity,
   selectedSourceId,
+  selectedExposureId: initialExposureId,
   exposures = [],
   onRefresh,
 }) => {
@@ -117,10 +119,21 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
     }
   }, [exposures.length, currentIdentity?.hmac_id]);
 
-  // Handle selectedSourceId navigation from ExposuresView
+  // Handle selectedSourceId or initialExposureId navigation from ExposuresView
   const lastNavigatedSourceRef = useRef<string | undefined>(undefined);
+  const lastNavigatedExpRef = useRef<string | undefined>(undefined);
   useEffect(() => {
-    if (selectedSourceId && selectedSourceId !== lastNavigatedSourceRef.current && availableExposures.length > 0) {
+    if (initialExposureId && initialExposureId !== lastNavigatedExpRef.current && availableExposures.length > 0) {
+      lastNavigatedExpRef.current = initialExposureId;
+      const match = availableExposures.find((e) => e.id === initialExposureId);
+      if (match) {
+        const timer = setTimeout(() => {
+          handleSelectExposure(match.id, availableExposures);
+          setActiveTab("templates");
+        }, 0);
+        return () => clearTimeout(timer);
+      }
+    } else if (selectedSourceId && selectedSourceId !== lastNavigatedSourceRef.current && availableExposures.length > 0) {
       lastNavigatedSourceRef.current = selectedSourceId;
       const match = availableExposures.find((e) => e.source_id === selectedSourceId);
       if (match) {
@@ -131,7 +144,7 @@ export const RemediationHub: React.FC<RemediationHubProps> = ({
         return () => clearTimeout(timer);
       }
     }
-  }, [selectedSourceId, availableExposures, handleSelectExposure]);
+  }, [initialExposureId, selectedSourceId, availableExposures, handleSelectExposure]);
 
   useEffect(() => {
     async function loadSources() {

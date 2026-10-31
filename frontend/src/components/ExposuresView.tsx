@@ -24,7 +24,7 @@ interface ExposuresViewProps {
   exposures: DiscoveredExposure[];
   currentIdentity: PhoneParseResult | null;
   onRefresh: () => void;
-  onOpenRemediation: (selectedSourceId?: string) => void;
+  onOpenRemediation: (selectedSourceId?: string, selectedExposureId?: string) => void;
   onNavigateToScan: () => void;
   onLoadDemo: () => void;
 }
@@ -104,7 +104,9 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
   onLoadDemo,
 }) => {
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [classificationFilter, setClassificationFilter] = useState<string>("ALL");
   const [searchQuery, setSearchQuery] = useState("");
+  const [inspectingExposure, setInspectingExposure] = useState<DiscoveredExposure | null>(null);
   const [verifyingId, setVerifyingId] = useState<string | null>(null);
   const [verificationFeedback, setVerificationFeedback] = useState<{
     id: string;
@@ -144,7 +146,9 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        if (transitioningExposure) {
+        if (inspectingExposure) {
+          setInspectingExposure(null);
+        } else if (transitioningExposure) {
           setTransitioningExposure(null);
         } else if (selectedHistoryExposure) {
           setSelectedHistoryExposure(null);
@@ -153,16 +157,24 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [transitioningExposure, selectedHistoryExposure]);
+  }, [transitioningExposure, selectedHistoryExposure, inspectingExposure]);
 
   const filteredExposures = exposures.filter((exp) => {
     const matchesStatus = statusFilter === "ALL" || exp.remediation_status === statusFilter;
+    const matchesClassification =
+      classificationFilter === "ALL" ||
+      (classificationFilter === "CONFIRMED_MATCH" && (exp.match_classification === "CONFIRMED_MATCH" || exp.match_type === "EXACT")) ||
+      (classificationFilter === "POSSIBLE_MATCH" && (exp.match_classification === "POSSIBLE_MATCH" || exp.match_type === "PROBABLE")) ||
+      (classificationFilter === "INCIDENTAL_MENTION" && exp.match_classification === "INCIDENTAL_MENTION") ||
+      (classificationFilter === "INCONCLUSIVE" && (exp.match_classification === "INCONCLUSIVE" || exp.match_type === "WEAK")) ||
+      (classificationFilter === "UNAVAILABLE" && (exp.remediation_status === "INACCESSIBLE_OR_INCONCLUSIVE" || exp.provider_status === "BLOCKED" || exp.provider_status === "RATE_LIMITED"));
     const matchesSearch =
       searchQuery === "" ||
       exp.domain.toLowerCase().includes(searchQuery.toLowerCase()) ||
       exp.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      exp.url.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesStatus && matchesSearch;
+      exp.url.toLowerCase().includes(searchQuery.toLowerCase()) ||
+      (exp.snippet && exp.snippet.toLowerCase().includes(searchQuery.toLowerCase()));
+    return matchesStatus && matchesClassification && matchesSearch;
   });
 
   const fetchHistory = async (exposureId: string, hmac: string) => {
@@ -512,7 +524,8 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="input-field py-1.5 text-xs min-w-[140px]"
+              className="input-field py-1.5 text-xs min-w-[130px]"
+              aria-label="Filter by Status"
             >
               <option value="ALL">All Statuses</option>
               <option value="DISCOVERED">Discovered</option>
@@ -523,6 +536,23 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
               <option value="ACKNOWLEDGED">Acknowledged</option>
               <option value="VERIFIED_REMOVED">Verified Removed</option>
               <option value="REJECTED_MATCH">Rejected</option>
+            </select>
+          </div>
+
+          <div className="flex items-center gap-1.5">
+            <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--text-dim)]" />
+            <select
+              value={classificationFilter}
+              onChange={(e) => setClassificationFilter(e.target.value)}
+              className="input-field py-1.5 text-xs min-w-[150px]"
+              aria-label="Filter by Match Classification"
+            >
+              <option value="ALL">All Classifications</option>
+              <option value="CONFIRMED_MATCH">Confirmed Matches</option>
+              <option value="POSSIBLE_MATCH">Probable Match</option>
+              <option value="INCIDENTAL_MENTION">Incidental Mention</option>
+              <option value="INCONCLUSIVE">Inconclusive Fragment</option>
+              <option value="UNAVAILABLE">Unavailable Sources</option>
             </select>
           </div>
 
@@ -775,6 +805,17 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                       <div className="flex items-center justify-end gap-1.5 flex-nowrap">
                         <button
                           type="button"
+                          onClick={() => setInspectingExposure(exp)}
+                          className="btn btn-secondary py-1 px-2.5 text-[11px] font-semibold shrink-0 flex items-center gap-1 text-[var(--pixel-cyan)]"
+                          title="Inspect complete evidence, match rationale, and verification details"
+                          aria-label={`Inspect details for ${exp.domain}`}
+                        >
+                          <Search className="w-3 h-3 text-[var(--pixel-cyan)]" />
+                          <span>Details</span>
+                        </button>
+
+                        <button
+                          type="button"
                           onClick={() => handleOpenHistory(exp)}
                           className="btn btn-secondary py-1 px-2.5 text-[11px] font-medium shrink-0 flex items-center gap-1"
                           title="View chronological audit events and follow-up timeline"
@@ -813,17 +854,15 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
                           <span>Update</span>
                         </button>
 
-                        {exp.source_id !== "generic_web" && (
-                          <button
-                            type="button"
-                            onClick={() => onOpenRemediation(exp.source_id)}
-                            className="btn btn-primary py-1 px-2 text-[11px] shrink-0"
-                            title="Generate removal letter or view opt-out instructions"
-                          >
-                            <FileText className="w-3 h-3 text-[#022c22]" />
-                            <span>Remediate</span>
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          onClick={() => onOpenRemediation(exp.source_id, exp.id)}
+                          className="btn btn-primary py-1 px-2.5 text-[11px] shrink-0 font-semibold flex items-center gap-1"
+                          title="Generate removal notice or statutory demand"
+                        >
+                          <FileText className="w-3 h-3 text-[#022c22]" />
+                          <span>Remediate</span>
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -1273,6 +1312,234 @@ export const ExposuresView: React.FC<ExposuresViewProps> = ({
               >
                 Close
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Finding Details Modal / Drawer */}
+      {inspectingExposure && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-sm animate-fade-in"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="finding-details-title"
+        >
+          <div className="card w-full max-w-2xl max-h-[90vh] flex flex-col border-[var(--border-subtle)] shadow-2xl overflow-hidden bg-[var(--bg-card)]">
+            {/* Header */}
+            <div className="p-4 border-b border-[var(--border-subtle)] flex items-center justify-between bg-[var(--bg-surface)]">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="kicker-tag text-[9px]">FINDING DETAILS & EVIDENCE</span>
+                  {getEvidenceOriginBadge(inspectingExposure.evidence_origin)}
+                </div>
+                <h3 id="finding-details-title" className="font-bold text-sm text-[var(--text-main)] flex items-center gap-2 mt-1">
+                  <span>{inspectingExposure.domain}</span>
+                  <a
+                    href={inspectingExposure.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-[var(--pixel-cyan)] hover:text-[var(--pixel-green)] inline-flex items-center"
+                    title="Open original URL in new tab"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </a>
+                </h3>
+                <div className="font-mono text-[10px] text-[var(--text-dim)] truncate max-w-lg mt-0.5">
+                  Canonical URL: {inspectingExposure.canonical_url || inspectingExposure.url}
+                </div>
+              </div>
+              <button
+                onClick={() => setInspectingExposure(null)}
+                className="text-[var(--text-dim)] hover:text-[var(--text-main)] p-1 rounded font-bold text-lg"
+                aria-label="Close details modal"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Scrollable Content */}
+            <div className="p-5 space-y-4 overflow-y-auto flex-1 text-xs leading-relaxed">
+              {/* Section 1: Identification & Match Classification */}
+              <div className="p-4 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-2.5">
+                <div className="text-[10px] font-bold text-[var(--text-dim)] uppercase tracking-wider">
+                  1. Identification & Match Classification
+                </div>
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <div>
+                    {getMatchBadge(
+                      inspectingExposure.match_type,
+                      inspectingExposure.match_classification,
+                      inspectingExposure.is_example_or_test,
+                      inspectingExposure.matched_tier
+                    )}
+                  </div>
+                  <div className="font-mono text-xs text-[var(--pixel-green)] font-semibold">
+                    Confidence: {(inspectingExposure.confidence * 100).toFixed(0)}% ({inspectingExposure.match_type})
+                  </div>
+                </div>
+
+                <div className="text-[11px] text-[var(--text-muted)] bg-[var(--bg-card)] p-2.5 rounded border border-[var(--border-subtle)] space-y-1">
+                  <div>
+                    <strong className="text-[var(--text-main)]">Classification Rationale: </strong>
+                    {inspectingExposure.confidence_explanation || getLifecycleExplanation(inspectingExposure.remediation_status)}
+                  </div>
+                  <div className="font-mono text-[10px] text-[var(--text-dim)]">
+                    Matched Representation: <span className="text-[var(--pixel-cyan)] font-semibold">{inspectingExposure.matched_representation || currentIdentity?.masked_display || "Masked Phone"}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Section 2: Available Evidence & Integrity */}
+              <div className="p-4 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-[var(--text-dim)] uppercase tracking-wider">
+                    2. Discovered Evidence & Source Origin
+                  </span>
+                  <span className="font-mono text-[10px] text-[var(--text-dim)]">
+                    Source: {inspectingExposure.source_id}
+                  </span>
+                </div>
+
+                {/* Evidence Origin Callout */}
+                <div className="text-[11px] p-2.5 rounded border leading-relaxed space-y-1">
+                  {inspectingExposure.evidence_origin === "FETCHED_PAGE" ? (
+                    <div className="text-emerald-300 bg-emerald-950/20 border-emerald-800/40 p-2 rounded">
+                      <strong className="text-emerald-200">● Live Page Body Inspected: </strong>
+                      The full content of this webpage was retrieved directly over HTTPS. ClearNum confirmed the presence of telephone digits in the live HTML.
+                    </div>
+                  ) : inspectingExposure.evidence_origin === "SEARCH_SNIPPET" ? (
+                    <div className="text-amber-300 bg-amber-950/20 border-amber-800/40 p-2 rounded">
+                      <strong className="text-amber-200">🔍 Search Snippet Only: </strong>
+                      This match was indexed in an external search engine snippet. The actual destination webpage has not been fetched yet to confirm current exposure.
+                    </div>
+                  ) : inspectingExposure.evidence_origin === "ARCHIVED_SNAPSHOT" ? (
+                    <div className="text-purple-300 bg-purple-950/20 border-purple-800/40 p-2 rounded">
+                      <strong className="text-purple-200">🕒 Historical Archive Snapshot: </strong>
+                      This match appeared in an Internet Archive (Wayback Machine) CDX record. Historical visibility does not prove current live exposure.
+                    </div>
+                  ) : (
+                    <div className="text-zinc-300 bg-zinc-900 border-zinc-700 p-2 rounded">
+                      <strong className="text-zinc-200">❓ Unverified Evidence Origin: </strong>
+                      Historical record with unverified evidence origin. Re-check the URL live to establish current status.
+                    </div>
+                  )}
+                </div>
+
+                {/* Snippet Quote */}
+                <div className="space-y-1">
+                  <span className="text-[10px] text-[var(--text-dim)] uppercase tracking-wider block">
+                    Recorded Text / Snippet Context
+                  </span>
+                  <blockquote className="p-3 rounded bg-[var(--bg-card)] border border-[var(--border-subtle)] font-mono text-xs text-[var(--text-muted)] leading-relaxed whitespace-pre-wrap break-words">
+                    {inspectingExposure.snippet || "No textual context snippet available."}
+                  </blockquote>
+                </div>
+
+                {inspectingExposure.verification_requirement && (
+                  <div className="text-[10px] text-[var(--text-dim)] font-mono">
+                    <strong>Verification Requirement:</strong> {inspectingExposure.verification_requirement}
+                  </div>
+                )}
+              </div>
+
+              {/* Section 3: Live Verification Status & Accessibility */}
+              <div className="p-4 rounded-lg bg-[var(--bg-app)] border border-[var(--border-subtle)] space-y-2.5">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-bold text-[var(--text-dim)] uppercase tracking-wider">
+                    3. Lifecycle State & Live Accessibility
+                  </span>
+                  <div>{getStatusBadge(inspectingExposure.remediation_status)}</div>
+                </div>
+
+                <p className="text-[11px] text-[var(--text-muted)]">
+                  {getLifecycleExplanation(inspectingExposure.remediation_status)}
+                </p>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] text-[var(--text-dim)] font-mono">
+                    Discovered: {new Date(inspectingExposure.discovered_at).toLocaleDateString()} • Checked: {new Date(inspectingExposure.last_checked_at).toLocaleDateString()}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleVerifyLive(inspectingExposure)}
+                    disabled={verifyingId === inspectingExposure.id}
+                    className="btn btn-secondary py-1 px-3 text-xs flex items-center gap-1.5"
+                  >
+                    <RefreshCw className={`w-3.5 h-3.5 ${verifyingId === inspectingExposure.id ? "animate-spin" : ""}`} />
+                    <span>{verifyingId === inspectingExposure.id ? "Verifying..." : "Re-check Live Now"}</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Section 4: Truthful Reality Check & Limitations */}
+              <div className="p-3.5 rounded-lg border border-cyan-900/30 bg-[#070e18] text-[11px] text-[var(--text-dim)] space-y-1">
+                <div className="font-semibold text-[var(--pixel-cyan)] flex items-center gap-1.5">
+                  <HelpCircle className="w-3.5 h-3.5" />
+                  <span>Honest Assessment & Limitations</span>
+                </div>
+                <p>
+                  ClearNum checks targeted public search engines and archives. It does not index private commercial databases or internal telecom records. An incidental mention indicates your number appeared in a discussion, ticket, or public note—not necessarily an organized data broker profile.
+                </p>
+              </div>
+            </div>
+
+            {/* Modal Actions Footer */}
+            <div className="p-4 border-t border-[var(--border-subtle)] flex flex-wrap items-center justify-between gap-2.5 bg-[var(--bg-surface)]">
+              <a
+                href={inspectingExposure.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+              >
+                <ExternalLink className="w-3.5 h-3.5 text-[var(--pixel-cyan)]" />
+                <span>Open Original Source</span>
+              </a>
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const exp = inspectingExposure;
+                    setInspectingExposure(null);
+                    handleOpenHistory(exp);
+                  }}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                >
+                  <Clock className="w-3.5 h-3.5 text-[var(--pixel-purple)]" />
+                  <span>History Timeline</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const exp = inspectingExposure;
+                    setInspectingExposure(null);
+                    setTransitioningExposure(exp);
+                    setTargetNextState("SUBMITTED");
+                    setSubmissionRef("");
+                    setTransitionNotes("");
+                    setTransitionError(null);
+                  }}
+                  className="btn btn-secondary py-1.5 px-3 text-xs flex items-center gap-1.5"
+                >
+                  <SlidersHorizontal className="w-3.5 h-3.5 text-[var(--pixel-cyan)]" />
+                  <span>Record Submission</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    const exp = inspectingExposure;
+                    setInspectingExposure(null);
+                    onOpenRemediation(exp.source_id, exp.id);
+                  }}
+                  className="btn btn-primary py-1.5 px-3.5 text-xs font-semibold flex items-center gap-1.5"
+                >
+                  <FileText className="w-3.5 h-3.5 text-[#022c22]" />
+                  <span>Prepare Statutory Notice</span>
+                </button>
+              </div>
             </div>
           </div>
         </div>

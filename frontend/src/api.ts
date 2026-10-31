@@ -390,10 +390,17 @@ export async function loadSyntheticDemo(): Promise<{
   return res.json();
 }
 
-export async function uploadMboxFile(file: File, identityHmac: string = "") {
+export async function uploadMboxFile(
+  file: File,
+  identityHmac: string = "",
+  phoneNumber: string = "",
+  defaultRegion: string = "US"
+) {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("identity_hmac", identityHmac);
+  if (identityHmac) formData.append("identity_hmac", identityHmac);
+  if (phoneNumber) formData.append("phone_number", phoneNumber);
+  if (defaultRegion) formData.append("default_region", defaultRegion);
   const res = await fetch(`${API_BASE}/import/mbox`, {
     method: "POST",
     body: formData,
@@ -402,10 +409,17 @@ export async function uploadMboxFile(file: File, identityHmac: string = "") {
   return res.json();
 }
 
-export async function uploadSmsFile(file: File, identityHmac: string = "") {
+export async function uploadSmsFile(
+  file: File,
+  identityHmac: string = "",
+  phoneNumber: string = "",
+  defaultRegion: string = "US"
+) {
   const formData = new FormData();
   formData.append("file", file);
-  formData.append("identity_hmac", identityHmac);
+  if (identityHmac) formData.append("identity_hmac", identityHmac);
+  if (phoneNumber) formData.append("phone_number", phoneNumber);
+  if (defaultRegion) formData.append("default_region", defaultRegion);
   const res = await fetch(`${API_BASE}/import/sms`, {
     method: "POST",
     body: formData,

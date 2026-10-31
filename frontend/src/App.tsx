@@ -22,6 +22,7 @@ export function App() {
   const [currentIdentity, setCurrentIdentity] = useState<PhoneParseResult | null>(null);
   const [exposures, setExposures] = useState<DiscoveredExposure[]>([]);
   const [selectedSourceId, setSelectedSourceId] = useState<string | undefined>(undefined);
+  const [selectedExposureId, setSelectedExposureId] = useState<string | undefined>(undefined);
   const [toast, setToast] = useState<{ message: string; type: "success" | "info" | "error" } | null>(null);
 
   // Initialize with default demo parse on mount
@@ -96,8 +97,9 @@ export function App() {
     }
   };
 
-  const handleOpenRemediation = (sourceId?: string) => {
+  const handleOpenRemediation = (sourceId?: string, exposureId?: string) => {
     setSelectedSourceId(sourceId);
+    setSelectedExposureId(exposureId);
     setActiveTab("remediation");
   };
 
@@ -147,6 +149,7 @@ export function App() {
           <RemediationHub
             currentIdentity={currentIdentity}
             selectedSourceId={selectedSourceId}
+            selectedExposureId={selectedExposureId}
             exposures={exposures}
             onRefresh={() => refreshData()}
           />

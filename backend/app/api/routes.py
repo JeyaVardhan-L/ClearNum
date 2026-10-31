@@ -1,6 +1,7 @@
 """FastAPI routes for NumberShield platform."""
 
 import os
+import re
 import uuid
 from pathlib import Path
 from typing import List, Optional, Set, Dict, Tuple
@@ -1481,6 +1482,7 @@ async def verify_exposure_endpoint(req: RescanVerificationRequest):
 @router.post("/import/mbox")
 async def import_mbox_endpoint(
     file: UploadFile = File(...),
+    identity_hmac: str = Form(""),
     phone_number: str = Form(""),
     default_region: str = Form("US"),
 ):
@@ -1493,12 +1495,32 @@ async def import_mbox_endpoint(
         content = await file.read()
         temp_path.write_bytes(content)
         subs = parse_mbox_file(temp_path, phone=norm, max_emails=250)
-        
-        # Save subscriptions to DB if identity exists
-        if norm and norm.hmac_id:
+
+        target_hmac = norm.hmac_id if (norm and norm.hmac_id) else (identity_hmac.strip() if identity_hmac else None)
+        exposures_created = 0
+
+        # Save subscriptions and exposures to DB if target identity exists
+        if target_hmac:
             conn = get_db_connection()
             cursor = conn.cursor()
             now_iso = utc_now_iso()
+
+            # Ensure identity exists in identities table to satisfy foreign keys
+            if norm and norm.hmac_id:
+                cursor.execute("""
+                    INSERT INTO identities (id, hmac_id, masked_phone, country_code, carrier_name, line_type, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(hmac_id) DO NOTHING
+                """, (
+                    str(uuid.uuid4()),
+                    norm.hmac_id,
+                    norm.masked_display,
+                    str(norm.country_code),
+                    norm.carrier_name,
+                    norm.line_type,
+                    now_iso,
+                ))
+
             for s in subs:
                 sub_id = str(uuid.uuid4())
                 cursor.execute("""
@@ -1507,7 +1529,7 @@ async def import_mbox_endpoint(
                     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (
                     sub_id,
-                    norm.hmac_id,
+                    target_hmac,
                     s.sender_name,
                     s.sender_contact,
                     s.channel,
@@ -1516,6 +1538,53 @@ async def import_mbox_endpoint(
                     "ACTIVE",
                     now_iso,
                 ))
+
+                # Create an exposure if phone was exposed or commercial list found
+                if s.phone_exposed or (s.unsubscribe_target and s.unsubscribe_target.startswith("http")):
+                    exp_id = str(uuid.uuid4())
+                    clean_u = s.unsubscribe_target if (s.unsubscribe_target and s.unsubscribe_target.startswith("http")) else f"https://{re.sub(r'[^a-zA-Z0-9.-]', '', s.sender_name.lower()) or 'email-list'}.local/unsubscribe"
+                    canon_u = canonicalize_url(clean_u) or clean_u
+                    parsed_d = urlparse(canon_u)
+                    domain = parsed_d.netloc.lower().replace("www.", "") or s.sender_name.lower()
+
+                    cursor.execute("""
+                        INSERT INTO exposures (
+                            id, identity_hmac, source_id, url, canonical_url, evidence_origin,
+                            domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        exp_id,
+                        target_hmac,
+                        "local_email_archive",
+                        clean_u,
+                        canon_u,
+                        "FETCHED_PAGE",
+                        domain,
+                        f"Email Subscription: {s.sender_name}",
+                        "EXACT" if s.phone_exposed else "PROBABLE",
+                        0.98 if s.phone_exposed else 0.85,
+                        s.evidence_snippet or f"Sender: {s.sender_name} <{s.sender_contact}>",
+                        now_iso,
+                        now_iso,
+                    ))
+
+                    action_id = str(uuid.uuid4())
+                    cursor.execute("""
+                        INSERT INTO remediation_actions (
+                            id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (
+                        action_id,
+                        exp_id,
+                        target_hmac,
+                        "local_email_archive",
+                        "ACTION_AVAILABLE",
+                        canon_u if canon_u.startswith("http") else None,
+                        f"Discovered in local MBOX email archive ({file.filename})",
+                        now_iso,
+                    ))
+                    exposures_created += 1
+
             conn.commit()
             conn.close()
 
@@ -1523,6 +1592,7 @@ async def import_mbox_endpoint(
             "success": True,
             "filename": file.filename,
             "discovered_subscriptions_count": len(subs),
+            "exposures_created": exposures_created,
             "subscriptions": [
                 {
                     "sender_name": s.sender_name,
@@ -1548,6 +1618,8 @@ async def import_mbox_endpoint(
 async def import_sms_endpoint(
     file: UploadFile = File(...),
     identity_hmac: str = Form(""),
+    phone_number: str = Form(""),
+    default_region: str = Form("US"),
 ):
     temp_dir = settings.db_path.parent / "temp_imports"
     temp_dir.mkdir(parents=True, exist_ok=True)
@@ -1558,10 +1630,83 @@ async def import_sms_endpoint(
         temp_path.write_bytes(content)
         senders = parse_sms_backup_file(temp_path, max_records=500)
 
+        norm = parse_and_normalize(phone_number, default_region) if phone_number else None
+        target_hmac = norm.hmac_id if (norm and norm.hmac_id) else (identity_hmac.strip() if identity_hmac else None)
+        exposures_created = 0
+
+        if target_hmac:
+            conn = get_db_connection()
+            cursor = conn.cursor()
+            now_iso = utc_now_iso()
+
+            if norm and norm.hmac_id:
+                cursor.execute("""
+                    INSERT INTO identities (id, hmac_id, masked_phone, country_code, carrier_name, line_type, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(hmac_id) DO NOTHING
+                """, (
+                    str(uuid.uuid4()),
+                    norm.hmac_id,
+                    norm.masked_display,
+                    str(norm.country_code),
+                    norm.carrier_name,
+                    norm.line_type,
+                    now_iso,
+                ))
+
+            for s in senders:
+                exp_id = str(uuid.uuid4())
+                safe_brand = re.sub(r'[^a-zA-Z0-9.-]', '', (s.brand_name or s.sender_number).lower())
+                clean_u = f"https://{safe_brand or 'telecom'}.dnd.local/optout"
+                canon_u = clean_u
+                domain = (s.brand_name or s.sender_number).lower()
+
+                cursor.execute("""
+                    INSERT INTO exposures (
+                        id, identity_hmac, source_id, url, canonical_url, evidence_origin,
+                        domain, title, match_type, confidence, snippet, discovered_at, last_checked_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    exp_id,
+                    target_hmac,
+                    f"sms_{s.category.lower()}",
+                    clean_u,
+                    canon_u,
+                    "FETCHED_PAGE",
+                    domain,
+                    f"Commercial SMS: {s.brand_name or s.sender_number} ({s.category})",
+                    "EXACT",
+                    0.95,
+                    s.sample_body or f"SMS Header: {s.sender_number} ({s.brand_name})",
+                    now_iso,
+                    now_iso,
+                ))
+
+                action_id = str(uuid.uuid4())
+                cursor.execute("""
+                    INSERT INTO remediation_actions (
+                        id, exposure_id, identity_hmac, source_id, status, official_url, notes, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    action_id,
+                    exp_id,
+                    target_hmac,
+                    f"sms_{s.category.lower()}",
+                    "ACTION_AVAILABLE",
+                    clean_u,
+                    f"Imported from SMS backup ({file.filename})",
+                    now_iso,
+                ))
+                exposures_created += 1
+
+            conn.commit()
+            conn.close()
+
         return {
             "success": True,
             "filename": file.filename,
             "senders_count": len(senders),
+            "exposures_created": exposures_created,
             "senders": [
                 {
                     "sender_number": s.sender_number,
